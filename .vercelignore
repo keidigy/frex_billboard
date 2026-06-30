@@ -1,0 +1,6 @@
+.db
+.next
+.pnpm-store
+node_modules
+*.log
+tsconfig.tsbuildinfo
