@@ -491,6 +491,15 @@ h2 {
   padding: 10px 12px;
 }
 
+.error-notice {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 7px;
+  color: var(--danger);
+  font-weight: 700;
+  padding: 10px 12px;
+}
+
 .two-column,
 .admin-grid,
 .debug-grid {

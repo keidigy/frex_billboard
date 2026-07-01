@@ -5,7 +5,11 @@ import { countUsers } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
-export default async function LoginPage({ searchParams }: { searchParams: Promise<{ registered?: string }> }) {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ registered?: string; loginError?: string; registerError?: string }>;
+}) {
   if ((await countUsers()).count === 0) redirect("/setup");
   const user = await getCurrentUser();
   if (user) redirect("/");
@@ -17,6 +21,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         <p className="eyebrow">Login</p>
         <h1>로그인</h1>
         {params.registered ? <p className="notice">가입 신청이 접수되었습니다. admin 승인 후 로그인할 수 있습니다.</p> : null}
+        {params.loginError ? <p className="error-notice">{params.loginError}</p> : null}
         <form action={loginAction} className="form-stack">
           <label>
             아이디
@@ -34,6 +39,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         <p className="eyebrow">Register</p>
         <h1>회원 등록 신청</h1>
         <p className="subtle">admin이 발급한 초대 코드가 필요합니다.</p>
+        {params.registerError ? <p className="error-notice">{params.registerError}</p> : null}
         <form action={registerUserAction} className="form-stack">
           <label>
             아이디

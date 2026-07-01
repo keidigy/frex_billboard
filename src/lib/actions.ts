@@ -16,8 +16,22 @@ function value(formData: FormData, key: string) {
 }
 
 function assertPasswordMatch(password: string, passwordConfirm: string) {
-  if (password.length < 8) throw new Error("비밀번호는 8자 이상이어야 합니다.");
-  if (password !== passwordConfirm) throw new Error("비밀번호 확인이 일치하지 않습니다.");
+  const error = passwordValidationError(password, passwordConfirm);
+  if (error) throw new Error(error);
+}
+
+function passwordValidationError(password: string, passwordConfirm: string) {
+  if (password.length < 8) return "비밀번호는 8자 이상이어야 합니다.";
+  if (password !== passwordConfirm) return "비밀번호 확인이 일치하지 않습니다.";
+  return null;
+}
+
+function loginError(message: string): never {
+  redirect(`/login?loginError=${encodeURIComponent(message)}`);
+}
+
+function registerError(message: string): never {
+  redirect(`/login?registerError=${encodeURIComponent(message)}`);
 }
 
 async function audit(actorId: string, actionType: AuditAction, targetTable: string, targetKey: string, beforeValue: unknown, afterValue: unknown, reason: string) {
@@ -65,9 +79,9 @@ export async function loginAction(formData: FormData) {
   const id = value(formData, "id");
   const password = value(formData, "password");
   const user = await dbGet<User>("SELECT * FROM users WHERE id = ?", [id]);
-  if (!user || !(await verifyPassword(password, user.password_hash))) throw new Error("아이디 또는 비밀번호가 올바르지 않습니다.");
-  if (user.approval_status !== "approved") throw new Error("아직 승인되지 않은 계정입니다.");
-  if (user.active_status !== "active") throw new Error("비활성화된 계정입니다.");
+  if (!user || !(await verifyPassword(password, user.password_hash))) loginError("아이디 또는 비밀번호가 올바르지 않습니다.");
+  if (user.approval_status !== "approved") loginError("아직 승인되지 않은 계정입니다.");
+  if (user.active_status !== "active") loginError("비활성화된 계정입니다.");
 
   await dbRun("UPDATE users SET latest_login_ip = ?, updated_at = ? WHERE id = ?", [await requestIp(), nowIso(), id]);
   await createSession(id);
@@ -87,14 +101,18 @@ export async function registerUserAction(formData: FormData) {
   const inviteCode = value(formData, "inviteCode");
   const password = value(formData, "password");
   const passwordConfirm = value(formData, "passwordConfirm");
-  if (!id || !realName || !inviteCode) throw new Error("아이디, 실명, 초대 코드는 필수입니다.");
-  assertPasswordMatch(password, passwordConfirm);
+  if (!id || !realName || !inviteCode) registerError("아이디, 실명, 초대 코드는 필수입니다.");
+  const passwordError = passwordValidationError(password, passwordConfirm);
+  if (passwordError) registerError(passwordError);
+
+  const existingUser = await dbGet<{ id: string }>("SELECT id FROM users WHERE id = ?", [id]);
+  if (existingUser) registerError("이미 사용 중인 아이디입니다.");
 
   const invite = await dbGet<{ code: string }>("SELECT * FROM invite_codes WHERE code = ? AND status = 'active' AND expires_at > ?", [
     inviteCode,
     nowIso(),
   ]);
-  if (!invite) throw new Error("유효한 초대 코드가 아닙니다.");
+  if (!invite) registerError("유효한 초대 코드가 아닙니다. admin에게 새 초대 코드를 요청해 주세요.");
 
   const ipHash = hmacIp(await requestIp());
   const duplicate = await dbGet<{ count: number | bigint }>(
