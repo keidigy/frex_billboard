@@ -24,6 +24,18 @@ TURSO_AUTH_TOKEN=...
 
 환경 변수가 없으면 Vercel에서는 앱이 명시적으로 실패합니다. 로컬 개발은 위 환경 변수 없이 `.db/frex-billboard.sqlite`를 사용합니다.
 
+## Daily price cron
+
+Vercel Cron은 매일 05:00 KST에 `/api/cron/daily-prices`를 호출합니다. Vercel Cron 스케줄은 UTC 기준이므로 `vercel.json`에는 `0 20 * * *`로 설정되어 있습니다.
+
+필수 환경 변수:
+
+```bash
+CRON_SECRET=...
+```
+
+Cron route는 `Authorization: Bearer $CRON_SECRET` 요청만 처리합니다. 실행 시 진행 중인 리그의 미확정 종목에 대해 외부 일봉 데이터를 조회하고, 실제 거래일 종가가 새로 있을 때만 `price_snapshots`에 추가합니다.
+
 ## 최초 admin
 
 사용자 DB가 비어 있으면 `/setup`에서 최초 관리자를 생성합니다. 최초 생성자는 자동으로 `admin` 권한과 승인 상태를 받습니다.

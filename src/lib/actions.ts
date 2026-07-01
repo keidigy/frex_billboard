@@ -231,7 +231,7 @@ export async function registerLeagueEntryAction(formData: FormData) {
     await audit(user.id, "create", "league_entries", entryId, null, after, "participant entry create");
   }
 
-  await insertPriceSnapshot(entryId, startPrice, provider);
+  await insertPriceSnapshot(entryId, startPrice, provider, lastPriceAt);
   revalidatePath("/");
   revalidatePath("/settings");
 }
@@ -254,7 +254,7 @@ export async function earlyConfirmAction(formData: FormData) {
      WHERE id = ?`,
     [latest.price, latest.price, latest.price, latest.provider, latest.at, nowIso(), nowIso(), entryId]
   );
-  await insertPriceSnapshot(entryId, latest.price, latest.provider);
+  await insertPriceSnapshot(entryId, latest.price, latest.provider, latest.at);
   const after = await dbGet<LeagueEntry>("SELECT * FROM league_entries WHERE id = ?", [entryId]);
   await audit(user.id, "update", "league_entries", entryId, before, after, "participant early confirm");
   revalidatePath("/");
