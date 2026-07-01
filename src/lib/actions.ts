@@ -8,7 +8,7 @@ import { countUsers, dbGet, dbRun, nowIso } from "@/lib/db";
 import { byteLength } from "@/lib/format";
 import { canEarlyConfirm, canRegister, ensureDefaultLeagues, getDebugNow, getLeague } from "@/lib/leagues";
 import { currencyFromSearch, insertPriceSnapshot, latestClose } from "@/lib/markets";
-import { seedDebugData } from "@/lib/seed";
+import { deleteDebugData, seedDebugData } from "@/lib/seed";
 import type { AuditAction, LeagueEntry, User } from "@/lib/types";
 
 function value(formData: FormData, key: string) {
@@ -301,6 +301,17 @@ export async function seedDebugDataAction() {
   await seedDebugData(admin.id);
   revalidatePath("/");
   revalidatePath("/admin");
+  revalidatePath("/rankings");
+  revalidatePath("/leagues");
+  revalidatePath("/settings");
+}
+
+export async function deleteDebugDataAction() {
+  const admin = await requireAdmin();
+  await deleteDebugData(admin.id);
+  revalidatePath("/");
+  revalidatePath("/admin");
+  revalidatePath("/admin/debug");
   revalidatePath("/rankings");
   revalidatePath("/leagues");
   revalidatePath("/settings");

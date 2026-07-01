@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
-import { seedDebugDataAction, setDebugNowAction, setProviderFailureAction } from "@/lib/actions";
+import { deleteDebugDataAction, seedDebugDataAction, setDebugNowAction, setProviderFailureAction } from "@/lib/actions";
 import { getCurrentUser } from "@/lib/auth";
 import { countUsers, dbAll } from "@/lib/db";
 import { formatDateTime } from "@/lib/format";
@@ -81,6 +81,12 @@ export default async function DebugPage() {
           <p className="subtle">approved 멤버 4명, S/M/L 종목, 7일치 일별 종가 스냅샷, 감사 로그를 생성합니다. 데모 계정 비밀번호는 모두 password123입니다.</p>
           <form action={seedDebugDataAction}>
             <button type="submit">debug seed 생성/갱신</button>
+          </form>
+          <form action={deleteDebugDataAction} className="debug-delete-form">
+            <p className="subtle">member1~member4와 연결된 종목/가격 스냅샷/session만 삭제합니다. 시각/provider 실패 설정은 유지됩니다.</p>
+            <button className="small-button danger" type="submit">
+              debug seed 삭제
+            </button>
           </form>
         </article>
 

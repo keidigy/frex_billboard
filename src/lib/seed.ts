@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { hashSync } from "bcryptjs";
-import { dbBatch, dbGet, nowIso } from "@/lib/db";
+import { dbAll, dbBatch, dbGet, nowIso } from "@/lib/db";
 import { ensureDefaultLeagues } from "@/lib/leagues";
 
 const demoUsers = [
@@ -24,6 +24,8 @@ const demoEntries = [
   ["S3LLE1", "member3", "SK Hynix", "000660", "KR", "KRW", 241000, 260000],
   ["S3LLE1", "member4", "Amazon", "AMZN", "US", "USD", 218, 214],
 ] as const;
+
+const demoUserIds = demoUsers.map(([id]) => id);
 
 function seededClose(startPrice: number, currentPrice: number, dayIndex: number, entryIndex: number) {
   const lastIndex = 6;
@@ -105,4 +107,69 @@ export async function seedDebugData(actorId: string) {
   });
 
   await dbBatch(statements);
+}
+
+export async function deleteDebugData(actorId: string) {
+  const now = nowIso();
+  const userIds = [...demoUserIds];
+  const placeholders = userIds.map(() => "?").join(",");
+  const [users, entries, snapshots] = await Promise.all([
+    dbAll<{ id: string }>(`SELECT id FROM users WHERE id IN (${placeholders})`, userIds),
+    dbAll<{ id: string }>(`SELECT id FROM league_entries WHERE user_id IN (${placeholders})`, userIds),
+    dbAll<{ id: string }>(
+      `SELECT price_snapshots.id
+       FROM price_snapshots
+       JOIN league_entries ON league_entries.id = price_snapshots.league_entry_id
+       WHERE league_entries.user_id IN (${placeholders})`,
+      userIds
+    ),
+  ]);
+
+  await dbBatch([
+    {
+      sql: `DELETE FROM price_snapshots
+            WHERE league_entry_id IN (
+              SELECT id FROM league_entries WHERE user_id IN (${placeholders})
+            )`,
+      args: userIds,
+    },
+    {
+      sql: `DELETE FROM league_entries WHERE user_id IN (${placeholders})`,
+      args: userIds,
+    },
+    {
+      sql: `DELETE FROM sessions WHERE user_id IN (${placeholders})`,
+      args: userIds,
+    },
+    {
+      sql: `UPDATE invite_codes
+            SET used_by_user_id = NULL,
+                used_at = NULL,
+                status = CASE WHEN status = 'used' THEN 'revoked' ELSE status END
+            WHERE used_by_user_id IN (${placeholders})`,
+      args: userIds,
+    },
+    {
+      sql: `DELETE FROM invite_codes WHERE issuer_id IN (${placeholders})`,
+      args: userIds,
+    },
+    {
+      sql: `DELETE FROM users WHERE id IN (${placeholders})`,
+      args: userIds,
+    },
+    {
+      sql: `INSERT INTO audit_logs
+        (actor_id, action_type, target_table, target_key, before_value, after_value, reason, created_at)
+       VALUES (?, 'delete', 'debug_seed', 'deleteDebugData', ?, NULL, 'admin debug seed cleanup', ?)`,
+      args: [
+        actorId,
+        JSON.stringify({
+          demoUsers: users.length,
+          demoEntries: entries.length,
+          demoSnapshots: snapshots.length,
+        }),
+        now,
+      ],
+    },
+  ]);
 }
