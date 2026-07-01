@@ -9,13 +9,13 @@ import { getHistoricalRankings, type HistoricalRankingMode } from "@/lib/ranking
 export const dynamic = "force-dynamic";
 
 export default async function RankingsPage({ searchParams }: { searchParams: Promise<{ mode?: HistoricalRankingMode }> }) {
-  if (countUsers().count === 0) redirect("/setup");
+  if ((await countUsers()).count === 0) redirect("/setup");
   const user = await getCurrentUser();
   if (!user) redirect("/login");
   await finalizeEndedLeagues();
   const params = await searchParams;
   const mode = params.mode === "score" ? "score" : "medal";
-  const rows = getHistoricalRankings(mode);
+  const rows = await getHistoricalRankings(mode);
 
   return (
     <AppShell user={user}>

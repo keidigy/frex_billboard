@@ -23,12 +23,12 @@ function leagueWeight(type: string) {
   return 1;
 }
 
-export function getHistoricalRankings(mode: HistoricalRankingMode) {
-  const leagues = getAllLeagues();
+export async function getHistoricalRankings(mode: HistoricalRankingMode) {
+  const leagues = await getAllLeagues();
   const byUser = new Map<string, HistoricalRankingRow>();
 
   for (const league of leagues) {
-    const ranked = getRankedEntriesForLeague(league.id);
+    const ranked = await getRankedEntriesForLeague(league.id);
     for (const entry of ranked) {
       const existing =
         byUser.get(entry.user_id) ??

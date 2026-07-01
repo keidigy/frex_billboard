@@ -2,23 +2,22 @@ import { redirect } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { seedDebugDataAction, setDebugNowAction, setProviderFailureAction } from "@/lib/actions";
 import { getCurrentUser } from "@/lib/auth";
-import { countUsers, getDb } from "@/lib/db";
+import { countUsers, dbAll } from "@/lib/db";
 import { formatDateTime } from "@/lib/format";
 import { getDebugNow } from "@/lib/leagues";
 
 export const dynamic = "force-dynamic";
 
 export default async function DebugPage() {
-  if (countUsers().count === 0) redirect("/setup");
+  if ((await countUsers()).count === 0) redirect("/setup");
   const user = await getCurrentUser();
   if (!user) redirect("/login");
   if (user.role !== "admin") redirect("/");
 
-  const db = getDb();
   const flags = Object.fromEntries(
-    (db.prepare("SELECT key, value FROM debug_state").all() as Array<{ key: string; value: string }>).map((row) => [row.key, row.value])
+    (await dbAll<{ key: string; value: string }>("SELECT key, value FROM debug_state")).map((row) => [row.key, row.value])
   );
-  const now = getDebugNow();
+  const now = await getDebugNow();
 
   return (
     <AppShell user={user}>

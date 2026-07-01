@@ -11,6 +11,19 @@ pnpm dev
 
 로컬 DB는 `.db/frex-billboard.sqlite`에 생성됩니다. `.db/`는 `.gitignore`에 포함되어 배포/커밋 대상에서 제외됩니다.
 
+## Production DB
+
+Vercel 배포 환경에서는 로컬 파일 시스템이 영속 저장소가 아니므로 Turso/libSQL을 사용합니다.
+
+필수 환경 변수:
+
+```bash
+TURSO_DATABASE_URL=libsql://...
+TURSO_AUTH_TOKEN=...
+```
+
+환경 변수가 없으면 Vercel에서는 앱이 명시적으로 실패합니다. 로컬 개발은 위 환경 변수 없이 `.db/frex-billboard.sqlite`를 사용합니다.
+
 ## 최초 admin
 
 사용자 DB가 비어 있으면 `/setup`에서 최초 관리자를 생성합니다. 최초 생성자는 자동으로 `admin` 권한과 승인 상태를 받습니다.

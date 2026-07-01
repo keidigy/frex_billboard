@@ -6,7 +6,7 @@ import { countUsers } from "@/lib/db";
 export const dynamic = "force-dynamic";
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ registered?: string }> }) {
-  if (countUsers().count === 0) redirect("/setup");
+  if ((await countUsers()).count === 0) redirect("/setup");
   const user = await getCurrentUser();
   if (user) redirect("/");
   const params = await searchParams;

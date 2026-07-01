@@ -8,26 +8,31 @@ import { finalizeEndedLeagues, getDashboardRowsForLeague, getStartedLeagues } fr
 export const dynamic = "force-dynamic";
 
 export default async function LeaguesPage() {
-  if (countUsers().count === 0) redirect("/setup");
+  if ((await countUsers()).count === 0) redirect("/setup");
   const user = await getCurrentUser();
   if (!user) redirect("/login");
   await finalizeEndedLeagues();
-  const leagues = getStartedLeagues();
+  const leagues = await getStartedLeagues();
+  const leagueViews = await Promise.all(
+    leagues.map(async (league) => ({
+      league,
+      rows: await getDashboardRowsForLeague(league),
+    }))
+  );
 
   return (
     <AppShell user={user}>
       <section className="history-layout">
         <aside className="league-index">
           <h2>리그 인덱스</h2>
-          {leagues.map((league) => (
+          {leagueViews.map(({ league }) => (
             <a key={league.id} href={`#${league.id}`}>
               {league.name}
             </a>
           ))}
         </aside>
         <div className="league-results">
-          {leagues.map((league) => {
-            const rows = getDashboardRowsForLeague(league);
+          {leagueViews.map(({ league, rows }) => {
             return (
               <article className="card" id={league.id} key={league.id}>
                 <p className="eyebrow">{league.name}</p>

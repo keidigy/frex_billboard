@@ -8,7 +8,7 @@ import { finalizeEndedLeagues } from "@/lib/leagues";
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  if (countUsers().count === 0) redirect("/setup");
+  if ((await countUsers()).count === 0) redirect("/setup");
   const user = await getCurrentUser();
   if (!user) redirect("/login");
   await finalizeEndedLeagues();

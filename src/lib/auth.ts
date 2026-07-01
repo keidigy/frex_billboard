@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import { cookies, headers } from "next/headers";
-import { getDb, nowIso } from "@/lib/db";
+import { dbGet, dbRun, nowIso } from "@/lib/db";
 import type { User } from "@/lib/types";
 
 const SESSION_COOKIE = "frex_session";
@@ -31,15 +31,13 @@ export async function getCurrentUser() {
   const token = cookieStore.get(SESSION_COOKIE)?.value;
   if (!token) return null;
 
-  const db = getDb();
-  const row = db
-    .prepare(
-      `SELECT users.*
-       FROM sessions
-       JOIN users ON users.id = sessions.user_id
-       WHERE sessions.token = ? AND sessions.expires_at > ?`
-    )
-    .get(token, nowIso()) as User | undefined;
+  const row = await dbGet<User>(
+    `SELECT users.*
+     FROM sessions
+     JOIN users ON users.id = sessions.user_id
+     WHERE sessions.token = ? AND sessions.expires_at > ?`,
+    [token, nowIso()]
+  );
 
   if (!row || row.approval_status !== "approved" || row.active_status !== "active") {
     return null;
@@ -65,9 +63,12 @@ export async function createSession(userId: string) {
   const createdAt = nowIso();
   const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 14).toISOString();
 
-  getDb()
-    .prepare("INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)")
-    .run(token, userId, createdAt, expiresAt);
+  await dbRun("INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)", [
+    token,
+    userId,
+    createdAt,
+    expiresAt,
+  ]);
 
   const cookieStore = await cookies();
   cookieStore.set(SESSION_COOKIE, token, {
@@ -83,7 +84,7 @@ export async function clearSession() {
   const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE)?.value;
   if (token) {
-    getDb().prepare("DELETE FROM sessions WHERE token = ?").run(token);
+    await dbRun("DELETE FROM sessions WHERE token = ?", [token]);
   }
   cookieStore.delete(SESSION_COOKIE);
 }

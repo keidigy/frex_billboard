@@ -5,14 +5,18 @@ import { changePasswordAction } from "@/lib/actions";
 import { getCurrentUser } from "@/lib/auth";
 import { countUsers } from "@/lib/db";
 import { canRegister, getVisibleLeagues } from "@/lib/leagues";
+import type { League } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
-  if (countUsers().count === 0) redirect("/setup");
+  if ((await countUsers()).count === 0) redirect("/setup");
   const user = await getCurrentUser();
   if (!user) redirect("/login");
-  const leagues = getVisibleLeagues().filter(canRegister);
+  const visibleLeagues = await getVisibleLeagues();
+  const leagues = (
+    await Promise.all(visibleLeagues.map(async (league) => ((await canRegister(league)) ? league : null)))
+  ).filter((league): league is League => Boolean(league));
 
   return (
     <AppShell user={user}>

@@ -1,4 +1,4 @@
-import { getDb, nowIso } from "@/lib/db";
+import { dbAll, dbBatch, dbGet, dbRun, nowIso } from "@/lib/db";
 import { buildFinalizationPatch, pickFinalClose } from "@/lib/finalization";
 import { historicalCloses, insertPriceSnapshot } from "@/lib/markets";
 import { calculateRebalancedPortfolioIndex } from "@/lib/portfolio";
@@ -19,19 +19,26 @@ function addMonthsKst(year: number, month: number, plus: number) {
   return date.toISOString();
 }
 
-export function ensureDefaultLeagues() {
-  const db = getDb();
-  const exists = db.prepare("SELECT COUNT(*) AS count FROM leagues").get() as { count: number };
-  if (exists.count > 0) return;
+function leagueInsertArgs(row: League) {
+  return {
+    id: row.id,
+    season_number: row.season_number,
+    league_type: row.league_type,
+    episode: row.episode,
+    name: row.name,
+    starts_at: row.starts_at,
+    ends_at: row.ends_at,
+    registration_opens_at: row.registration_opens_at,
+    early_confirm_opens_at: row.early_confirm_opens_at,
+    created_at: row.created_at,
+  };
+}
+
+export async function ensureDefaultLeagues() {
+  const exists = await dbGet<{ count: number | bigint }>("SELECT COUNT(*) AS count FROM leagues");
+  if (Number(exists?.count ?? 0) > 0) return;
 
   const createdAt = nowIso();
-  const insert = db.prepare(`
-    INSERT OR IGNORE INTO leagues
-      (id, season_number, league_type, episode, name, starts_at, ends_at, registration_opens_at, early_confirm_opens_at, created_at)
-    VALUES
-      (@id, @season_number, @league_type, @episode, @name, @starts_at, @ends_at, @registration_opens_at, @early_confirm_opens_at, @created_at)
-  `);
-
   const seasonNumber = 3;
   const seasonStartYear = 2026;
   const seasonStartMonth = 7;
@@ -85,30 +92,32 @@ export function ensureDefaultLeagues() {
     created_at: createdAt,
   });
 
-  const tx = db.transaction((items: League[]) => {
-    for (const item of items) insert.run(item);
-  });
-  tx(rows);
+  await dbBatch(
+    rows.map((row) => ({
+      sql: `INSERT OR IGNORE INTO leagues
+        (id, season_number, league_type, episode, name, starts_at, ends_at, registration_opens_at, early_confirm_opens_at, created_at)
+       VALUES
+        (@id, @season_number, @league_type, @episode, @name, @starts_at, @ends_at, @registration_opens_at, @early_confirm_opens_at, @created_at)`,
+      args: leagueInsertArgs(row),
+    }))
+  );
 }
 
-export function getDebugNow() {
-  const row = getDb().prepare("SELECT value FROM debug_state WHERE key = 'now'").get() as
-    | { value: string }
-    | undefined;
+export async function getDebugNow() {
+  const row = await dbGet<{ value: string }>("SELECT value FROM debug_state WHERE key = 'now'");
   return row?.value ? new Date(row.value) : new Date();
 }
 
-export function getVisibleLeagues() {
-  ensureDefaultLeagues();
-  const now = getDebugNow().toISOString();
-  const rows = getDb()
-    .prepare(
-      `SELECT * FROM leagues
-       WHERE registration_opens_at <= ? AND ends_at > ?
-       ORDER BY starts_at ASC,
-         CASE league_type WHEN 'S' THEN 1 WHEN 'M' THEN 2 ELSE 3 END ASC`
-    )
-    .all(now, now) as League[];
+export async function getVisibleLeagues() {
+  await ensureDefaultLeagues();
+  const now = (await getDebugNow()).toISOString();
+  const rows = await dbAll<League>(
+    `SELECT * FROM leagues
+     WHERE registration_opens_at <= ? AND ends_at > ?
+     ORDER BY starts_at ASC,
+       CASE league_type WHEN 'S' THEN 1 WHEN 'M' THEN 2 ELSE 3 END ASC`,
+    [now, now]
+  );
 
   const byType = new Map<LeagueType, League>();
   for (const row of rows) {
@@ -117,33 +126,30 @@ export function getVisibleLeagues() {
   return (["S", "M", "L"] as LeagueType[]).map((type) => byType.get(type)).filter(Boolean) as League[];
 }
 
-export function getAllLeagues() {
-  ensureDefaultLeagues();
-  return getDb()
-    .prepare(
-      `SELECT * FROM leagues
-       ORDER BY starts_at DESC,
-         CASE league_type WHEN 'L' THEN 1 WHEN 'M' THEN 2 ELSE 3 END ASC`
-    )
-    .all() as League[];
+export async function getAllLeagues() {
+  await ensureDefaultLeagues();
+  return dbAll<League>(
+    `SELECT * FROM leagues
+     ORDER BY starts_at DESC,
+       CASE league_type WHEN 'L' THEN 1 WHEN 'M' THEN 2 ELSE 3 END ASC`
+  );
 }
 
-export function getStartedLeagues() {
-  ensureDefaultLeagues();
-  const now = getDebugNow().toISOString();
-  return getDb()
-    .prepare(
-      `SELECT * FROM leagues
-       WHERE starts_at <= ?
-       ORDER BY starts_at DESC,
-         CASE league_type WHEN 'L' THEN 1 WHEN 'M' THEN 2 ELSE 3 END ASC`
-    )
-    .all(now) as League[];
+export async function getStartedLeagues() {
+  await ensureDefaultLeagues();
+  const now = (await getDebugNow()).toISOString();
+  return dbAll<League>(
+    `SELECT * FROM leagues
+     WHERE starts_at <= ?
+     ORDER BY starts_at DESC,
+       CASE league_type WHEN 'L' THEN 1 WHEN 'M' THEN 2 ELSE 3 END ASC`,
+    [now]
+  );
 }
 
-export function getLeague(id: string) {
-  ensureDefaultLeagues();
-  return getDb().prepare("SELECT * FROM leagues WHERE id = ?").get(id) as League | undefined;
+export async function getLeague(id: string) {
+  await ensureDefaultLeagues();
+  return dbGet<League>("SELECT * FROM leagues WHERE id = ?", [id]);
 }
 
 function finalPriceWindow(endsAt: string) {
@@ -153,33 +159,30 @@ function finalPriceWindow(endsAt: string) {
   return { from, to };
 }
 
-function getStoredFinalPrice(entryId: string, endsAt: string) {
-  return getDb()
-    .prepare(
-      `SELECT captured_at AS at, price
-       FROM price_snapshots
-       WHERE league_entry_id = ? AND captured_at <= ?
-       ORDER BY captured_at DESC
-       LIMIT 1`
-    )
-    .get(entryId, endsAt) as { at: string; price: number } | undefined;
+async function getStoredFinalPrice(entryId: string, endsAt: string) {
+  return dbGet<{ at: string; price: number }>(
+    `SELECT captured_at AS at, price
+     FROM price_snapshots
+     WHERE league_entry_id = ? AND captured_at <= ?
+     ORDER BY captured_at DESC
+     LIMIT 1`,
+    [entryId, endsAt]
+  );
 }
 
 export async function finalizeEndedLeagues() {
-  ensureDefaultLeagues();
-  const db = getDb();
-  const now = getDebugNow().toISOString();
-  const rows = db
-    .prepare(
-      `SELECT league_entries.*, leagues.ends_at AS league_ends_at
-       FROM league_entries
-       JOIN leagues ON leagues.id = league_entries.league_id
-       WHERE leagues.ends_at <= ?
-         AND league_entries.disqualified = 0
-         AND (league_entries.ended_at IS NULL OR league_entries.ranking_price IS NULL)
-       ORDER BY leagues.ends_at ASC, league_entries.updated_at ASC`
-    )
-    .all(now) as Array<LeagueEntry & { league_ends_at: string }>;
+  await ensureDefaultLeagues();
+  const now = (await getDebugNow()).toISOString();
+  const rows = await dbAll<LeagueEntry & { league_ends_at: string }>(
+    `SELECT league_entries.*, leagues.ends_at AS league_ends_at
+     FROM league_entries
+     JOIN leagues ON leagues.id = league_entries.league_id
+     WHERE leagues.ends_at <= ?
+       AND league_entries.disqualified = 0
+       AND (league_entries.ended_at IS NULL OR league_entries.ranking_price IS NULL)
+     ORDER BY leagues.ends_at ASC, league_entries.updated_at ASC`,
+    [now]
+  );
 
   for (const row of rows) {
     let finalPrice = null;
@@ -187,7 +190,7 @@ export async function finalizeEndedLeagues() {
 
     if (fixedPrice == null) {
       if (row.provider === "debug-seed") {
-        const point = getStoredFinalPrice(row.id, row.league_ends_at);
+        const point = await getStoredFinalPrice(row.id, row.league_ends_at);
         if (point) finalPrice = { price: point.price, provider: "debug-seed", at: point.at };
       } else {
         try {
@@ -197,13 +200,13 @@ export async function finalizeEndedLeagues() {
           if (!point) throw new Error("No close before league end");
           finalPrice = { price: point.close, provider: history.provider, at: point.date };
         } catch {
-          db.prepare("UPDATE league_entries SET manual_price_required = 1, updated_at = ? WHERE id = ?").run(nowIso(), row.id);
+          await dbRun("UPDATE league_entries SET manual_price_required = 1, updated_at = ? WHERE id = ?", [nowIso(), row.id]);
           continue;
         }
       }
 
       if (!finalPrice) {
-        db.prepare("UPDATE league_entries SET manual_price_required = 1, updated_at = ? WHERE id = ?").run(nowIso(), row.id);
+        await dbRun("UPDATE league_entries SET manual_price_required = 1, updated_at = ? WHERE id = ?", [nowIso(), row.id]);
         continue;
       }
     }
@@ -211,7 +214,7 @@ export async function finalizeEndedLeagues() {
     const patch = buildFinalizationPatch(row, row.league_ends_at, finalPrice);
     if (!patch) continue;
 
-    db.prepare(
+    await dbRun(
       `UPDATE league_entries
        SET end_price = COALESCE(end_price, ?),
            ranking_price = ?,
@@ -221,58 +224,56 @@ export async function finalizeEndedLeagues() {
            ended_at = ?,
            manual_price_required = ?,
            updated_at = ?
-       WHERE id = ?`
-    ).run(
-      patch.endPrice,
-      patch.rankingPrice,
-      patch.currentPrice,
-      patch.provider,
-      patch.lastPriceAt,
-      patch.endedAt,
-      patch.manualPriceRequired,
-      nowIso(),
-      row.id
+       WHERE id = ?`,
+      [
+        patch.endPrice,
+        patch.rankingPrice,
+        patch.currentPrice,
+        patch.provider,
+        patch.lastPriceAt,
+        patch.endedAt,
+        patch.manualPriceRequired,
+        nowIso(),
+        row.id,
+      ]
     );
 
     if (patch.snapshot) {
-      insertPriceSnapshot(row.id, patch.snapshot.price, patch.snapshot.provider, patch.snapshot.at);
+      await insertPriceSnapshot(row.id, patch.snapshot.price, patch.snapshot.provider, patch.snapshot.at);
     }
   }
 }
 
-export function canRegister(league: League) {
-  const now = getDebugNow().toISOString();
+export async function canRegister(league: League) {
+  const now = (await getDebugNow()).toISOString();
   return league.registration_opens_at <= now && now < league.starts_at;
 }
 
-export function canEarlyConfirm(league: League) {
-  const now = getDebugNow().toISOString();
+export async function canEarlyConfirm(league: League) {
+  const now = (await getDebugNow()).toISOString();
   return league.early_confirm_opens_at <= now && now < league.ends_at;
 }
 
-export function getEntriesForLeague(leagueId: string) {
-  return getDb()
-    .prepare(
-      `SELECT league_entries.*, users.real_name, users.approval_status
-       FROM league_entries
-       JOIN users ON users.id = league_entries.user_id
-       WHERE league_entries.league_id = ?
-       ORDER BY users.real_name ASC`
-    )
-    .all(leagueId) as LeagueEntryWithUser[];
+export async function getEntriesForLeague(leagueId: string) {
+  return dbAll<LeagueEntryWithUser>(
+    `SELECT league_entries.*, users.real_name, users.approval_status
+     FROM league_entries
+     JOIN users ON users.id = league_entries.user_id
+     WHERE league_entries.league_id = ?
+     ORDER BY users.real_name ASC`,
+    [leagueId]
+  );
 }
 
-export function getApprovedActiveMembers() {
-  return getDb()
-    .prepare(
-      `SELECT id, real_name
-       FROM users
-       WHERE role = 'member'
-         AND approval_status = 'approved'
-         AND active_status = 'active'
-       ORDER BY real_name ASC`
-    )
-    .all() as Array<{ id: string; real_name: string }>;
+export async function getApprovedActiveMembers() {
+  return dbAll<Array<{ id: string; real_name: string }>[number]>(
+    `SELECT id, real_name
+     FROM users
+     WHERE role = 'member'
+       AND approval_status = 'approved'
+       AND active_status = 'active'
+     ORDER BY real_name ASC`
+  );
 }
 
 export function rankEntries(entries: LeagueEntryWithUser[]) {
@@ -300,17 +301,17 @@ export function rankEntries(entries: LeagueEntryWithUser[]) {
   }) as RankedEntry[];
 }
 
-export function getRankedEntriesForLeague(leagueId: string) {
-  return rankEntries(getEntriesForLeague(leagueId));
+export async function getRankedEntriesForLeague(leagueId: string) {
+  return rankEntries(await getEntriesForLeague(leagueId));
 }
 
-export function getDashboardRowsForLeague(league: League) {
-  const members = getApprovedActiveMembers();
-  const entries = getEntriesForLeague(league.id);
+export async function getDashboardRowsForLeague(league: League) {
+  const members = await getApprovedActiveMembers();
+  const entries = await getEntriesForLeague(league.id);
   const ranked = rankEntries(entries);
   const rankedUserIds = new Set(ranked.map((entry) => entry.user_id));
   const entryByUserId = new Map(entries.map((entry) => [entry.user_id, entry]));
-  const now = getDebugNow().toISOString();
+  const now = (await getDebugNow()).toISOString();
 
   const inactiveRows = members
     .filter((member) => !rankedUserIds.has(member.id))
@@ -331,52 +332,51 @@ export function getDashboardRowsForLeague(league: League) {
   ];
 }
 
-export function getPriceSeries(entryId: string) {
-  return getDb()
-    .prepare(
-      `SELECT captured_at AS date, price AS close
-       FROM price_snapshots
-       WHERE league_entry_id = ?
-       ORDER BY captured_at ASC`
-    )
-    .all(entryId) as { date: string; close: number }[];
+export async function getPriceSeries(entryId: string) {
+  return dbAll<{ date: string; close: number }>(
+    `SELECT captured_at AS date, price AS close
+     FROM price_snapshots
+     WHERE league_entry_id = ?
+     ORDER BY captured_at ASC`,
+    [entryId]
+  );
 }
 
-export function getPortfolioIndex(leagueIds: string[]) {
+export async function getPortfolioIndex(leagueIds: string[]) {
   if (leagueIds.length === 0) return 1000;
   const placeholders = leagueIds.map(() => "?").join(",");
-  const rows = getDb()
-    .prepare(
-      `SELECT start_price, COALESCE(ranking_price, early_confirm_price, end_price, current_price, start_price) AS basis
-       FROM league_entries
-       WHERE league_id IN (${placeholders}) AND disqualified = 0`
-    )
-    .all(...leagueIds) as { start_price: number; basis: number }[];
+  const rows = await dbAll<{ start_price: number; basis: number }>(
+    `SELECT start_price, COALESCE(ranking_price, early_confirm_price, end_price, current_price, start_price) AS basis
+     FROM league_entries
+     WHERE league_id IN (${placeholders}) AND disqualified = 0`,
+    leagueIds
+  );
   if (rows.length === 0) return 1000;
   const avgReturn = rows.reduce((sum, row) => sum + row.basis / row.start_price, 0) / rows.length;
   return 1000 * avgReturn;
 }
 
-function getLeagueReturnFactor(leagueId: string) {
-  const rows = getDb()
-    .prepare(
-      `SELECT start_price, COALESCE(ranking_price, early_confirm_price, end_price, current_price, start_price) AS basis
-       FROM league_entries
-       WHERE league_id = ? AND disqualified = 0`
-    )
-    .all(leagueId) as { start_price: number; basis: number }[];
+async function getLeagueReturnFactor(leagueId: string) {
+  const rows = await dbAll<{ start_price: number; basis: number }>(
+    `SELECT start_price, COALESCE(ranking_price, early_confirm_price, end_price, current_price, start_price) AS basis
+     FROM league_entries
+     WHERE league_id = ? AND disqualified = 0`,
+    [leagueId]
+  );
 
   if (rows.length === 0) return 1;
   return rows.reduce((sum, row) => sum + row.basis / row.start_price, 0) / rows.length;
 }
 
-export function getRebalancedPortfolioIndex() {
-  const leagues = getStartedLeagues().slice().sort((a, b) => a.starts_at.localeCompare(b.starts_at));
-  const segments = leagues.map((league) => ({
-    leagueType: league.league_type,
-    startsAt: league.starts_at,
-    factor: getLeagueReturnFactor(league.id),
-  }));
+export async function getRebalancedPortfolioIndex() {
+  const leagues = (await getStartedLeagues()).slice().sort((a, b) => a.starts_at.localeCompare(b.starts_at));
+  const segments = await Promise.all(
+    leagues.map(async (league) => ({
+      leagueType: league.league_type,
+      startsAt: league.starts_at,
+      factor: await getLeagueReturnFactor(league.id),
+    }))
+  );
 
   return calculateRebalancedPortfolioIndex(segments, 1000);
 }

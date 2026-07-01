@@ -11,9 +11,30 @@ function rowClass(rank: number) {
   return "";
 }
 
-export function Dashboard({ user }: { user: User }) {
-  const leagues = getVisibleLeagues();
-  const portfolio = getRebalancedPortfolioIndex();
+export async function Dashboard({ user }: { user: User }) {
+  const leagues = await getVisibleLeagues();
+  const portfolio = await getRebalancedPortfolioIndex();
+  const leagueViews = await Promise.all(
+    leagues.map(async (league) => {
+      const ranked = await getRankedEntriesForLeague(league.id);
+      const dashboardRows = await getDashboardRowsForLeague(league);
+      const registerOpen = await canRegister(league);
+      const earlyOpen = await canEarlyConfirm(league);
+      const chartSeries = await Promise.all(
+        ranked.slice(0, 5).map(async (entry) => ({
+          label: entry.real_name,
+          values: (await getPriceSeries(entry.id)).map((point) => ({
+            date: point.date,
+            close: point.close,
+            currency: entry.currency,
+            value: ((point.close - entry.start_price) / entry.start_price) * 100,
+          })),
+        }))
+      );
+
+      return { league, dashboardRows, registerOpen, earlyOpen, chartSeries };
+    })
+  );
 
   return (
     <>
@@ -31,21 +52,7 @@ export function Dashboard({ user }: { user: User }) {
       </section>
 
       <section className="dashboard-grid">
-        {leagues.map((league) => {
-          const ranked = getRankedEntriesForLeague(league.id);
-          const dashboardRows = getDashboardRowsForLeague(league);
-          const registerOpen = canRegister(league);
-          const earlyOpen = canEarlyConfirm(league);
-          const chartSeries = ranked.slice(0, 5).map((entry) => ({
-            label: entry.real_name,
-            values: getPriceSeries(entry.id).map((point) => ({
-              date: point.date,
-              close: point.close,
-              currency: entry.currency,
-              value: ((point.close - entry.start_price) / entry.start_price) * 100,
-            })),
-          }));
-
+        {leagueViews.map(({ league, dashboardRows, registerOpen, earlyOpen, chartSeries }) => {
           return (
             <article className="league-panel" key={league.id}>
               <div className="panel-head">

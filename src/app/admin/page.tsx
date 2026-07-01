@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { approveUserAction, createInviteCodeAction, deactivateUserAction, manualPriceAdjustAction, rejectUserAction } from "@/lib/actions";
 import { getCurrentUser } from "@/lib/auth";
-import { countUsers, getDb } from "@/lib/db";
+import { countUsers, dbAll } from "@/lib/db";
 import { formatDateTime, formatMoney } from "@/lib/format";
 import { finalizeEndedLeagues } from "@/lib/leagues";
 import type { InviteCode, LeagueEntryWithUser, User } from "@/lib/types";
@@ -11,25 +11,22 @@ import type { InviteCode, LeagueEntryWithUser, User } from "@/lib/types";
 export const dynamic = "force-dynamic";
 
 export default async function AdminPage() {
-  if (countUsers().count === 0) redirect("/setup");
+  if ((await countUsers()).count === 0) redirect("/setup");
   const user = await getCurrentUser();
   if (!user) redirect("/login");
   if (user.role !== "admin") redirect("/");
   await finalizeEndedLeagues();
 
-  const db = getDb();
-  const users = db.prepare("SELECT * FROM users ORDER BY created_at DESC").all() as User[];
-  const invites = db.prepare("SELECT * FROM invite_codes ORDER BY issued_at DESC LIMIT 20").all() as InviteCode[];
-  const entries = db
-    .prepare(
-      `SELECT league_entries.*, users.real_name, users.approval_status
-       FROM league_entries
-       JOIN users ON users.id = league_entries.user_id
-       ORDER BY manual_price_required DESC, updated_at DESC
-       LIMIT 30`
-    )
-    .all() as LeagueEntryWithUser[];
-  const audits = db.prepare("SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 40").all() as Array<Record<string, string>>;
+  const users = await dbAll<User>("SELECT * FROM users ORDER BY created_at DESC");
+  const invites = await dbAll<InviteCode>("SELECT * FROM invite_codes ORDER BY issued_at DESC LIMIT 20");
+  const entries = await dbAll<LeagueEntryWithUser>(
+    `SELECT league_entries.*, users.real_name, users.approval_status
+     FROM league_entries
+     JOIN users ON users.id = league_entries.user_id
+     ORDER BY manual_price_required DESC, updated_at DESC
+     LIMIT 30`
+  );
+  const audits = await dbAll<Record<string, string>>("SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 40");
 
   return (
     <AppShell user={user}>

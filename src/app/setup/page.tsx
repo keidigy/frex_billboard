@@ -4,8 +4,8 @@ import { countUsers } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
-export default function SetupPage() {
-  if (countUsers().count !== 0) redirect("/login");
+export default async function SetupPage() {
+  if ((await countUsers()).count !== 0) redirect("/login");
 
   return (
     <main className="auth-page">
