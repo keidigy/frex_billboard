@@ -1,18 +1,52 @@
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { SettingsClient } from "@/components/SettingsClient";
-import { changePasswordAction } from "@/lib/actions";
+import { changePasswordAction, type RegisterLeagueEntryState } from "@/lib/actions";
 import { getCurrentUser, redirectIfPasswordResetRequired } from "@/lib/auth";
 import { countUsers } from "@/lib/db";
 import { getRegistrableLeagues } from "@/lib/leagues";
 
 export const dynamic = "force-dynamic";
 
-export default async function SettingsPage() {
+type SettingsSearchParams = {
+  entryStatus?: string;
+  leagueName?: string;
+  stockName?: string;
+  symbol?: string;
+  startPrice?: string;
+  provider?: string;
+  manualPriceRequired?: string;
+  submittedAt?: string;
+};
+
+function initialRegistrationState(params: SettingsSearchParams): RegisterLeagueEntryState {
+  const action = params.entryStatus === "updated" ? "updated" : params.entryStatus === "created" ? "created" : null;
+  if (!action) return { ok: false };
+
+  const startPrice = Number(params.startPrice);
+  return {
+    ok: true,
+    action,
+    leagueName: params.leagueName,
+    stockName: params.stockName,
+    symbol: params.symbol,
+    startPrice: Number.isFinite(startPrice) ? startPrice : undefined,
+    provider: params.provider,
+    manualPriceRequired: params.manualPriceRequired === "1",
+    submittedAt: params.submittedAt,
+  };
+}
+
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<SettingsSearchParams>;
+}) {
   if ((await countUsers()).count === 0) redirect("/setup");
   const user = await getCurrentUser();
   if (!user) redirect("/login");
   redirectIfPasswordResetRequired(user);
+  const params = await searchParams;
   const leagues = await getRegistrableLeagues();
 
   return (
@@ -61,7 +95,7 @@ export default async function SettingsPage() {
         </article>
       </section>
 
-      {leagues.length ? <SettingsClient leagues={leagues} /> : null}
+      {leagues.length ? <SettingsClient leagues={leagues} initialRegisterState={initialRegistrationState(params)} /> : null}
     </AppShell>
   );
 }

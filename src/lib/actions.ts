@@ -304,10 +304,26 @@ function registrationError(error: unknown) {
   return message;
 }
 
+function registrationSuccessUrl(state: RegisterLeagueEntryState) {
+  const params = new URLSearchParams({
+    entryStatus: state.action ?? "created",
+    leagueName: state.leagueName ?? "",
+    stockName: state.stockName ?? "",
+    symbol: state.symbol ?? "",
+    startPrice: String(state.startPrice ?? ""),
+    provider: state.provider ?? "",
+    manualPriceRequired: state.manualPriceRequired ? "1" : "0",
+    submittedAt: state.submittedAt ?? nowIso(),
+  });
+  return `/settings?${params.toString()}`;
+}
+
 export async function registerLeagueEntryAction(
   _prevState: RegisterLeagueEntryState,
   formData: FormData
 ): Promise<RegisterLeagueEntryState> {
+  let successState: RegisterLeagueEntryState | null = null;
+
   try {
     const user = await requirePasswordReadyUser();
     const leagueId = value(formData, "leagueId");
@@ -376,8 +392,9 @@ export async function registerLeagueEntryAction(
 
     await insertPriceSnapshot(entryId, startPrice, provider, lastPriceAt);
     revalidatePath("/");
-    revalidatePath("/settings");
-    return {
+    revalidatePath("/leagues");
+    revalidatePath("/rankings");
+    successState = {
       ok: true,
       action: existing ? "updated" : "created",
       leagueId,
@@ -392,6 +409,8 @@ export async function registerLeagueEntryAction(
   } catch (error) {
     return { ok: false, error: registrationError(error), submittedAt: nowIso() };
   }
+
+  redirect(registrationSuccessUrl(successState));
 }
 
 export async function earlyConfirmAction(formData: FormData) {

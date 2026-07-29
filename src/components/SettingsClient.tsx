@@ -6,14 +6,20 @@ import type { League, SymbolSearchResult } from "@/lib/types";
 
 const initialRegisterState: RegisterLeagueEntryState = { ok: false };
 
-export function SettingsClient({ leagues }: { leagues: League[] }) {
+export function SettingsClient({
+  leagues,
+  initialRegisterState: serverInitialRegisterState = initialRegisterState,
+}: {
+  leagues: League[];
+  initialRegisterState?: RegisterLeagueEntryState;
+}) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SymbolSearchResult[]>([]);
   const [selected, setSelected] = useState<SymbolSearchResult | null>(null);
   const [searched, setSearched] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
-  const [registerState, registerAction, registerPending] = useActionState(registerLeagueEntryAction, initialRegisterState);
+  const [registerState, registerAction, registerPending] = useActionState(registerLeagueEntryAction, serverInitialRegisterState);
 
   const defaultLeagueId = useMemo(() => leagues[0]?.id ?? "", [leagues]);
 
