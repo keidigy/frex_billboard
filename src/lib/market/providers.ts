@@ -1,4 +1,12 @@
 import type { Currency, PricePoint, SymbolSearchResult } from "@/lib/types";
+import {
+  isAllowedSearchName,
+  isLeveragedOrInverse,
+  normalizeNaverSearchItems,
+  normalizeYahooAutocompleteItems,
+  type NaverSearchItem,
+  type YahooAutocompleteItem,
+} from "@/lib/market/search-normalization";
 
 export type PriceProvider = {
   name: string;
@@ -26,12 +34,8 @@ function inferCurrency(symbol: string, currency?: string): Currency {
   return "USD";
 }
 
-function isLeveragedOrInverse(name: string) {
-  return /\b(leveraged|inverse|ultra|bear|bull|2x|3x|short)\b|레버리지|인버스/i.test(name);
-}
-
 function isEligible(item: SymbolSearchResult) {
-  if (isLeveragedOrInverse(item.name)) return false;
+  if (!isAllowedSearchName(item.name)) return false;
   if (item.type === "etf") return true;
   if (item.market === "KR") return (item.marketCap ?? 0) >= 1_000_000_000_000;
   return (item.marketCap ?? 0) >= 1_000_000_000;
@@ -61,6 +65,38 @@ async function investingSearchRaw(query: string) {
   return data.quotes ?? [];
 }
 
+async function naverSearchRaw(query: string) {
+  const url = `https://m.stock.naver.com/front-api/search?q=${encodeURIComponent(
+    query
+  )}&target=stock&size=20&page=1`;
+  const res = await fetch(url, {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "Mozilla/5.0 FrexBillboard/0.1",
+      Referer: "https://m.stock.naver.com/",
+    },
+    next: { revalidate: 60 * 10 },
+  });
+  if (!res.ok) throw new Error(`Naver search failed: ${res.status}`);
+  const data = (await res.json()) as { result?: { items?: NaverSearchItem[] } };
+  return data.result?.items ?? [];
+}
+
+async function yahooAutocompleteRaw(query: string) {
+  const url = `https://query1.finance.yahoo.com/v6/finance/autocomplete?query=${encodeURIComponent(
+    query
+  )}&region=US&lang=en`;
+  const res = await fetch(url, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 FrexBillboard/0.1",
+    },
+    next: { revalidate: 60 * 10 },
+  });
+  if (!res.ok) throw new Error(`Yahoo autocomplete failed: ${res.status}`);
+  const data = (await res.json()) as { ResultSet?: { Result?: YahooAutocompleteItem[] } };
+  return data.ResultSet?.Result ?? [];
+}
+
 async function investingPairId(symbol: string) {
   const quotes = await investingSearchRaw(symbol);
   const normalized = symbol.replace(/\.(KS|KQ)$/i, "").toUpperCase();
@@ -88,40 +124,45 @@ export const yahooProvider: PriceProvider = {
       },
       next: { revalidate: 60 * 30 },
     });
-    if (!res.ok) throw new Error(`Yahoo search failed: ${res.status}`);
-    const data = (await res.json()) as {
-      quotes?: Array<{
-        symbol?: string;
-        shortname?: string;
-        longname?: string;
-        quoteType?: string;
-        exchange?: string;
-        exchDisp?: string;
-        currency?: string;
-        marketCap?: number;
-      }>;
-    };
+    if (res.ok) {
+      const data = (await res.json()) as {
+        quotes?: Array<{
+          symbol?: string;
+          shortname?: string;
+          longname?: string;
+          quoteType?: string;
+          exchange?: string;
+          exchDisp?: string;
+          currency?: string;
+          marketCap?: number;
+        }>;
+      };
 
-    return (data.quotes ?? [])
-      .filter((quote) => quote.symbol && quote.quoteType)
-      .map((quote) => {
-        const symbol = quote.symbol!;
-        const exchange = quote.exchDisp ?? quote.exchange ?? "";
-        const type = quote.quoteType === "ETF" ? "etf" : "stock";
-        return {
-          symbol,
-          displaySymbol: symbol.replace(/\.(KS|KQ)$/i, ""),
-          name: quote.longname ?? quote.shortname ?? symbol,
-          market: inferMarket(symbol, exchange),
-          exchange,
-          currency: inferCurrency(symbol, quote.currency),
-          type,
-          marketCap: quote.marketCap ?? null,
-          source: "yahoo",
-        } satisfies SymbolSearchResult;
-      })
-      .filter((item) => item.type === "stock" || item.type === "etf")
-      .filter(isEligible);
+      const primary = (data.quotes ?? [])
+        .filter((quote) => quote.symbol && quote.quoteType)
+        .map((quote) => {
+          const symbol = quote.symbol!;
+          const exchange = quote.exchDisp ?? quote.exchange ?? "";
+          const type = quote.quoteType === "ETF" ? "etf" : "stock";
+          return {
+            symbol,
+            displaySymbol: symbol.replace(/\.(KS|KQ)$/i, ""),
+            name: quote.longname ?? quote.shortname ?? symbol,
+            market: inferMarket(symbol, exchange),
+            exchange,
+            currency: inferCurrency(symbol, quote.currency),
+            type,
+            marketCap: quote.marketCap ?? null,
+            source: "yahoo",
+          } satisfies SymbolSearchResult;
+        })
+        .filter((item) => item.type === "stock" || item.type === "etf")
+        .filter(isEligible);
+
+      if (primary.length > 0) return primary;
+    }
+
+    return normalizeYahooAutocompleteItems(await yahooAutocompleteRaw(query));
   },
   async getHistoricalCloses(symbol, from, to) {
     const normalized = normalizeYahooSymbol(symbol);
@@ -166,13 +207,21 @@ export const yahooProvider: PriceProvider = {
 export const naverProvider: PriceProvider = {
   name: "naver",
   async searchSymbols(query) {
-    if (!/^\d{4,6}$/.test(query.trim())) return [];
-    const price = await this.getLatestClose(query.trim().padStart(6, "0"));
+    const trimmed = query.trim();
+    try {
+      const results = normalizeNaverSearchItems(await naverSearchRaw(trimmed));
+      if (results.length > 0) return results;
+    } catch {
+      // Numeric code lookup below covers Naver search outages for Korean symbols.
+    }
+
+    if (!/^\d{4,6}$/.test(trimmed)) return [];
+    const price = await this.getLatestClose(trimmed.padStart(6, "0"));
     return [
       {
-        symbol: query.trim().padStart(6, "0"),
-        displaySymbol: query.trim().padStart(6, "0"),
-        name: `KRX ${query.trim().padStart(6, "0")}`,
+        symbol: trimmed.padStart(6, "0"),
+        displaySymbol: trimmed.padStart(6, "0"),
+        name: `KRX ${trimmed.padStart(6, "0")}`,
         market: "KR",
         exchange: "KRX",
         currency: price.currency,

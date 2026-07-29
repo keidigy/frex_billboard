@@ -10,7 +10,8 @@ async function debugFailureEnabled(provider: string) {
 function dedupe(results: SymbolSearchResult[]) {
   const map = new Map<string, SymbolSearchResult>();
   for (const result of results) {
-    if (!map.has(result.symbol)) map.set(result.symbol, result);
+    const key = `${result.market}:${result.displaySymbol}`;
+    if (!map.has(key)) map.set(key, result);
   }
   return [...map.values()];
 }
