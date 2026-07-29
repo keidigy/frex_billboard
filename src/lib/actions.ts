@@ -18,6 +18,7 @@ import { countUsers, dbGet, dbRun, nowIso } from "@/lib/db";
 import { byteLength } from "@/lib/format";
 import { canEarlyConfirm, canRegister, ensureDefaultLeagues, getDebugNow, getLeague } from "@/lib/leagues";
 import { currencyFromSearch, insertPriceSnapshot, latestClose } from "@/lib/markets";
+import { canonicalMarketSymbol } from "@/lib/market/symbol";
 import { deleteDebugData, seedDebugData } from "@/lib/seed";
 import type { AuditAction, LeagueEntry, User } from "@/lib/types";
 
@@ -328,8 +329,8 @@ export async function registerLeagueEntryAction(
     const user = await requirePasswordReadyUser();
     const leagueId = value(formData, "leagueId");
     const stockName = value(formData, "stockName");
-    const symbol = value(formData, "symbol");
-    const market = value(formData, "market") || "US";
+    const market = value(formData, "market") === "KR" ? "KR" : "US";
+    const symbol = canonicalMarketSymbol(value(formData, "symbol"), market);
     const reason = value(formData, "reason") || null;
     const currency = currencyFromSearch(formData.get("currency"));
     const league = await getLeague(leagueId);
@@ -341,10 +342,19 @@ export async function registerLeagueEntryAction(
     if (!stockName || !symbol) throw new Error("종목을 선택해야 합니다.");
 
     const taken = await dbGet<{ user_id: string }>(
-      "SELECT user_id FROM league_entries WHERE league_id = ? AND symbol = ? AND user_id <> ? LIMIT 1",
-      [leagueId, symbol, user.id]
+      `SELECT user_id
+       FROM league_entries
+       WHERE league_id = ?
+         AND user_id <> ?
+         AND market = ?
+         AND CASE
+               WHEN market = 'KR' THEN REPLACE(REPLACE(UPPER(symbol), '.KS', ''), '.KQ', '')
+               ELSE UPPER(symbol)
+             END = ?
+       LIMIT 1`,
+      [leagueId, user.id, market, symbol]
     );
-    if (taken) throw new Error("이미 이 리그에 등록된 종목입니다. 다른 종목을 선택해 주세요.");
+    if (taken) throw new Error(`${league.name}에는 ${symbol} 종목이 이미 다른 참가자에게 등록되어 있습니다. 다른 종목을 선택해 주세요.`);
 
     let startPrice = Number(formData.get("startPrice") || 0);
     let provider = "pending-start-price";

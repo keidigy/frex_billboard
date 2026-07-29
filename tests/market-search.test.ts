@@ -4,6 +4,7 @@ import {
   normalizeNaverSearchItems,
   normalizeYahooAutocompleteItems,
 } from "../src/lib/market/search-normalization.ts";
+import { canonicalMarketSymbol } from "../src/lib/market/symbol.ts";
 
 test("normalizeNaverSearchItems keeps Korean name search results and filters leveraged products", () => {
   const results = normalizeNaverSearchItems([
@@ -62,4 +63,11 @@ test("normalizeYahooAutocompleteItems keeps primary US equity and filters option
     ["AAPL"]
   );
   assert.equal(results[0].source, "yahoo-autocomplete");
+});
+
+test("canonicalMarketSymbol treats Korean provider suffixes as one listed stock", () => {
+  assert.equal(canonicalMarketSymbol("005930.KS", "KR"), "005930");
+  assert.equal(canonicalMarketSymbol("005930.KQ", "KR"), "005930");
+  assert.equal(canonicalMarketSymbol("5930", "KR"), "005930");
+  assert.equal(canonicalMarketSymbol("aapl", "US"), "AAPL");
 });
