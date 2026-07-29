@@ -1,8 +1,10 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
-import { registerLeagueEntryAction } from "@/lib/actions";
+import { useActionState, useMemo, useState, useTransition } from "react";
+import { registerLeagueEntryAction, type RegisterLeagueEntryState } from "@/lib/actions";
 import type { League, SymbolSearchResult } from "@/lib/types";
+
+const initialRegisterState: RegisterLeagueEntryState = { ok: false };
 
 export function SettingsClient({ leagues }: { leagues: League[] }) {
   const [query, setQuery] = useState("");
@@ -11,6 +13,7 @@ export function SettingsClient({ leagues }: { leagues: League[] }) {
   const [searched, setSearched] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [registerState, registerAction, registerPending] = useActionState(registerLeagueEntryAction, initialRegisterState);
 
   const defaultLeagueId = useMemo(() => leagues[0]?.id ?? "", [leagues]);
 
@@ -57,7 +60,11 @@ export function SettingsClient({ leagues }: { leagues: League[] }) {
             검색
           </button>
         </div>
-        {error ? <p className="inline-error">{error}</p> : null}
+        {error ? (
+          <p className="inline-error" role="alert">
+            {error}
+          </p>
+        ) : null}
         {searched && !error && results.length === 0 ? <p className="empty">검색 결과가 없습니다.</p> : null}
         <div className="result-list">
           {results.map((item) => (
@@ -74,7 +81,7 @@ export function SettingsClient({ leagues }: { leagues: League[] }) {
 
       <article className="card">
         <h2>선택 종목 등록</h2>
-        <form action={registerLeagueEntryAction} className="form-stack">
+        <form action={registerAction} className="form-stack">
           <label>
             리그
             <select name="leagueId" defaultValue={defaultLeagueId}>
@@ -87,11 +94,11 @@ export function SettingsClient({ leagues }: { leagues: League[] }) {
           </label>
           <label>
             종목명
-            <input name="stockName" value={selected?.name ?? ""} onChange={() => undefined} required />
+            <input name="stockName" value={selected?.name ?? ""} readOnly required />
           </label>
           <label>
             종목코드
-            <input name="symbol" value={selected?.symbol ?? ""} onChange={() => undefined} required />
+            <input name="symbol" value={selected?.symbol ?? ""} readOnly required />
           </label>
           <input type="hidden" name="market" value={selected?.market ?? "US"} />
           <input type="hidden" name="currency" value={selected?.currency ?? "USD"} />
@@ -103,8 +110,20 @@ export function SettingsClient({ leagues }: { leagues: League[] }) {
             등록 사유
             <textarea name="reason" rows={5} placeholder="중기/장기는 20byte 이상 필수" />
           </label>
-          <button type="submit" disabled={!selected}>
-            등록/수정
+          {registerState.ok ? (
+            <p className="inline-success" role="status" aria-live="polite">
+              {registerState.leagueName}에 {registerState.stockName} ({registerState.symbol}) {registerState.action === "updated" ? "수정" : "등록"} 완료.
+              시작가 {registerState.startPrice?.toLocaleString("ko-KR")} · {registerState.provider}
+              {registerState.manualPriceRequired ? " · 수동 시작가 사용" : null}
+            </p>
+          ) : null}
+          {!registerState.ok && registerState.error ? (
+            <p className="inline-error" role="alert">
+              {registerState.error}
+            </p>
+          ) : null}
+          <button type="submit" disabled={!selected || registerPending}>
+            {registerPending ? "등록 중..." : "등록/수정"}
           </button>
         </form>
       </article>

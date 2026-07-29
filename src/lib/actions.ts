@@ -282,69 +282,116 @@ export async function deactivateUserAction(formData: FormData) {
   revalidatePath("/admin");
 }
 
-export async function registerLeagueEntryAction(formData: FormData) {
-  const user = await requirePasswordReadyUser();
-  const leagueId = value(formData, "leagueId");
-  const stockName = value(formData, "stockName");
-  const symbol = value(formData, "symbol");
-  const market = value(formData, "market") || "US";
-  const reason = value(formData, "reason") || null;
-  const currency = currencyFromSearch(formData.get("currency"));
-  const league = await getLeague(leagueId);
-  if (!league) throw new Error("리그를 찾을 수 없습니다.");
-  if (!(await canRegister(league))) throw new Error("현재 이 리그는 등록/수정 가능 기간이 아닙니다.");
-  if ((league.league_type === "M" || league.league_type === "L") && byteLength(reason ?? "") < 20) {
-    throw new Error("중기/장기 리그 등록 사유는 20byte 이상이어야 합니다.");
-  }
-  if (!stockName || !symbol) throw new Error("종목을 선택해야 합니다.");
+export type RegisterLeagueEntryState = {
+  ok: boolean;
+  action?: "created" | "updated";
+  leagueId?: string;
+  leagueName?: string;
+  stockName?: string;
+  symbol?: string;
+  startPrice?: number;
+  provider?: string;
+  manualPriceRequired?: boolean;
+  submittedAt?: string;
+  error?: string;
+};
 
-  let startPrice = Number(formData.get("startPrice") || 0);
-  let provider = "manual-input";
-  let lastPriceAt = nowIso();
-  let manualPriceRequired = 0;
+function registrationError(error: unknown) {
+  const message = error instanceof Error ? error.message : "종목 등록에 실패했습니다.";
+  if (message.includes("UNIQUE constraint failed") && message.includes("league_entries.league_id") && message.includes("league_entries.symbol")) {
+    return "이미 이 리그에 등록된 종목입니다. 다른 종목을 선택해 주세요.";
+  }
+  return message;
+}
+
+export async function registerLeagueEntryAction(
+  _prevState: RegisterLeagueEntryState,
+  formData: FormData
+): Promise<RegisterLeagueEntryState> {
   try {
-    const latest = await latestClose(symbol);
-    startPrice = latest.price;
-    provider = latest.provider;
-    lastPriceAt = latest.at;
-  } catch {
-    if (!startPrice || Number.isNaN(startPrice)) throw new Error("실제 가격 조회가 실패했습니다. admin 수동 보정 또는 시작가 입력이 필요합니다.");
-    manualPriceRequired = 1;
-  }
+    const user = await requirePasswordReadyUser();
+    const leagueId = value(formData, "leagueId");
+    const stockName = value(formData, "stockName");
+    const symbol = value(formData, "symbol");
+    const market = value(formData, "market") || "US";
+    const reason = value(formData, "reason") || null;
+    const currency = currencyFromSearch(formData.get("currency"));
+    const league = await getLeague(leagueId);
+    if (!league) throw new Error("리그를 찾을 수 없습니다.");
+    if (!(await canRegister(league))) throw new Error("현재 이 리그는 등록/수정 가능 기간이 아닙니다.");
+    if ((league.league_type === "M" || league.league_type === "L") && byteLength(reason ?? "") < 20) {
+      throw new Error("중기/장기 리그 등록 사유는 20byte 이상이어야 합니다.");
+    }
+    if (!stockName || !symbol) throw new Error("종목을 선택해야 합니다.");
 
-  const now = nowIso();
-  const existing = await dbGet<LeagueEntry>("SELECT * FROM league_entries WHERE league_id = ? AND user_id = ?", [leagueId, user.id]);
-  const entryId = existing?.id ?? crypto.randomUUID();
-
-  if (existing) {
-    const before = existing;
-    await dbRun(
-      `UPDATE league_entries
-       SET stock_name = ?, symbol = ?, market = ?, reason = ?, start_price = ?, currency = ?,
-           end_price = NULL, early_confirm_price = NULL, ranking_price = NULL,
-           current_price = ?, provider = ?, last_price_at = ?, manual_price_required = ?,
-           ended_at = NULL, early_confirmed_at = NULL, early_confirmed = 0, updated_at = ?
-       WHERE id = ?`,
-      [stockName, symbol, market, reason, startPrice, currency, startPrice, provider, lastPriceAt, manualPriceRequired, now, entryId]
+    const taken = await dbGet<{ user_id: string }>(
+      "SELECT user_id FROM league_entries WHERE league_id = ? AND symbol = ? AND user_id <> ? LIMIT 1",
+      [leagueId, symbol, user.id]
     );
-    const after = await dbGet<LeagueEntry>("SELECT * FROM league_entries WHERE id = ?", [entryId]);
-    await audit(user.id, "update", "league_entries", entryId, before, after, "participant entry update");
-  } else {
-    await dbRun(
-      `INSERT INTO league_entries
-       (id, league_id, user_id, stock_name, symbol, market, reason, start_price, currency, end_price, early_confirm_price,
-        ranking_price, current_price, provider, last_price_at, created_at, updated_at, ended_at, early_confirmed_at,
-        early_confirmed, manual_price_required, disqualified)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, 0)`,
-      [entryId, leagueId, user.id, stockName, symbol, market, reason, startPrice, currency, startPrice, provider, lastPriceAt, now, now, manualPriceRequired]
-    );
-    const after = await dbGet<LeagueEntry>("SELECT * FROM league_entries WHERE id = ?", [entryId]);
-    await audit(user.id, "create", "league_entries", entryId, null, after, "participant entry create");
-  }
+    if (taken) throw new Error("이미 이 리그에 등록된 종목입니다. 다른 종목을 선택해 주세요.");
 
-  await insertPriceSnapshot(entryId, startPrice, provider, lastPriceAt);
-  revalidatePath("/");
-  revalidatePath("/settings");
+    let startPrice = Number(formData.get("startPrice") || 0);
+    let provider = "manual-input";
+    let lastPriceAt = nowIso();
+    let manualPriceRequired = 0;
+    try {
+      const latest = await latestClose(symbol);
+      startPrice = latest.price;
+      provider = latest.provider;
+      lastPriceAt = latest.at;
+    } catch {
+      if (!startPrice || Number.isNaN(startPrice)) throw new Error("실제 가격 조회가 실패했습니다. admin 수동 보정 또는 시작가 입력이 필요합니다.");
+      manualPriceRequired = 1;
+    }
+
+    const now = nowIso();
+    const existing = await dbGet<LeagueEntry>("SELECT * FROM league_entries WHERE league_id = ? AND user_id = ?", [leagueId, user.id]);
+    const entryId = existing?.id ?? crypto.randomUUID();
+
+    if (existing) {
+      const before = existing;
+      await dbRun(
+        `UPDATE league_entries
+         SET stock_name = ?, symbol = ?, market = ?, reason = ?, start_price = ?, currency = ?,
+             end_price = NULL, early_confirm_price = NULL, ranking_price = NULL,
+             current_price = ?, provider = ?, last_price_at = ?, manual_price_required = ?,
+             ended_at = NULL, early_confirmed_at = NULL, early_confirmed = 0, updated_at = ?
+         WHERE id = ?`,
+        [stockName, symbol, market, reason, startPrice, currency, startPrice, provider, lastPriceAt, manualPriceRequired, now, entryId]
+      );
+      const after = await dbGet<LeagueEntry>("SELECT * FROM league_entries WHERE id = ?", [entryId]);
+      await audit(user.id, "update", "league_entries", entryId, before, after, "participant entry update");
+    } else {
+      await dbRun(
+        `INSERT INTO league_entries
+         (id, league_id, user_id, stock_name, symbol, market, reason, start_price, currency, end_price, early_confirm_price,
+          ranking_price, current_price, provider, last_price_at, created_at, updated_at, ended_at, early_confirmed_at,
+          early_confirmed, manual_price_required, disqualified)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, 0)`,
+        [entryId, leagueId, user.id, stockName, symbol, market, reason, startPrice, currency, startPrice, provider, lastPriceAt, now, now, manualPriceRequired]
+      );
+      const after = await dbGet<LeagueEntry>("SELECT * FROM league_entries WHERE id = ?", [entryId]);
+      await audit(user.id, "create", "league_entries", entryId, null, after, "participant entry create");
+    }
+
+    await insertPriceSnapshot(entryId, startPrice, provider, lastPriceAt);
+    revalidatePath("/");
+    revalidatePath("/settings");
+    return {
+      ok: true,
+      action: existing ? "updated" : "created",
+      leagueId,
+      leagueName: league.name,
+      stockName,
+      symbol,
+      startPrice,
+      provider,
+      manualPriceRequired: manualPriceRequired === 1,
+      submittedAt: now,
+    };
+  } catch (error) {
+    return { ok: false, error: registrationError(error), submittedAt: nowIso() };
+  }
 }
 
 export async function earlyConfirmAction(formData: FormData) {

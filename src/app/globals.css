@@ -400,6 +400,7 @@ h2 {
 }
 
 .temp-password-result,
+.inline-success,
 .inline-error {
   border-radius: 6px;
   font-size: 12px;
@@ -408,7 +409,8 @@ h2 {
   padding: 7px 8px;
 }
 
-.temp-password-result {
+.temp-password-result,
+.inline-success {
   background: #ecfdf5;
   border: 1px solid #bbf7d0;
   color: #047857;
