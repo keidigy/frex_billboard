@@ -4,6 +4,16 @@ type SnapshotDate = {
   date: string;
 };
 
+export type DailyPriceEntryState = {
+  league_starts_at: string;
+  league_ends_at: string;
+  ended_at: string | null;
+  early_confirmed: number;
+  manual_price_required: number;
+  disqualified: number;
+  start_price_finalized_at: string | null;
+};
+
 const KST_DATE_FORMATTER = new Intl.DateTimeFormat("en-CA", {
   timeZone: "Asia/Seoul",
   year: "numeric",
@@ -28,6 +38,31 @@ export function captureWindowStart(leagueStartsAt: string, lastPriceAt: string |
   base.setUTCDate(base.getUTCDate() - overlapDays);
   if (base.getTime() < leagueStart.getTime()) return leagueStart.toISOString();
   return base.toISOString();
+}
+
+export function shouldFinalizeStartingPrice(
+  entry: Pick<DailyPriceEntryState, "league_starts_at" | "league_ends_at" | "ended_at" | "disqualified" | "start_price_finalized_at">,
+  now: string
+) {
+  return (
+    entry.start_price_finalized_at == null &&
+    entry.ended_at == null &&
+    entry.disqualified === 0 &&
+    entry.league_starts_at <= now &&
+    now < entry.league_ends_at
+  );
+}
+
+export function shouldCaptureDailyPrice(entry: DailyPriceEntryState, now: string) {
+  return (
+    entry.start_price_finalized_at != null &&
+    entry.ended_at == null &&
+    entry.disqualified === 0 &&
+    entry.early_confirmed === 0 &&
+    entry.manual_price_required === 0 &&
+    entry.league_starts_at <= now &&
+    now < entry.league_ends_at
+  );
 }
 
 export function selectMissingTradingCloses(

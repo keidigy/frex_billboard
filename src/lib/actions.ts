@@ -347,17 +347,17 @@ export async function registerLeagueEntryAction(
     if (taken) throw new Error("이미 이 리그에 등록된 종목입니다. 다른 종목을 선택해 주세요.");
 
     let startPrice = Number(formData.get("startPrice") || 0);
-    let provider = "manual-input";
-    let lastPriceAt = nowIso();
-    let manualPriceRequired = 0;
+    let provider = "pending-start-price";
+    let lastPriceAt: string | null = null;
     try {
       const latest = await latestClose(symbol);
       startPrice = latest.price;
       provider = latest.provider;
       lastPriceAt = latest.at;
     } catch {
-      if (!startPrice || Number.isNaN(startPrice)) throw new Error("실제 가격 조회가 실패했습니다. admin 수동 보정 또는 시작가 입력이 필요합니다.");
-      manualPriceRequired = 1;
+      // Registration must remain available even while every quote provider is unavailable.
+      // The scheduled start-price capture will retry at the league start.
+      if (!startPrice || Number.isNaN(startPrice)) startPrice = 1;
     }
 
     const now = nowIso();
@@ -371,9 +371,9 @@ export async function registerLeagueEntryAction(
          SET stock_name = ?, symbol = ?, market = ?, reason = ?, start_price = ?, currency = ?,
              end_price = NULL, early_confirm_price = NULL, ranking_price = NULL,
              current_price = ?, provider = ?, last_price_at = ?, manual_price_required = ?,
-             ended_at = NULL, early_confirmed_at = NULL, early_confirmed = 0, updated_at = ?
+             start_price_finalized_at = NULL, ended_at = NULL, early_confirmed_at = NULL, early_confirmed = 0, updated_at = ?
          WHERE id = ?`,
-        [stockName, symbol, market, reason, startPrice, currency, startPrice, provider, lastPriceAt, manualPriceRequired, now, entryId]
+        [stockName, symbol, market, reason, startPrice, currency, startPrice, provider, lastPriceAt, 0, now, entryId]
       );
       const after = await dbGet<LeagueEntry>("SELECT * FROM league_entries WHERE id = ?", [entryId]);
       await audit(user.id, "update", "league_entries", entryId, before, after, "participant entry update");
@@ -382,15 +382,14 @@ export async function registerLeagueEntryAction(
         `INSERT INTO league_entries
          (id, league_id, user_id, stock_name, symbol, market, reason, start_price, currency, end_price, early_confirm_price,
           ranking_price, current_price, provider, last_price_at, created_at, updated_at, ended_at, early_confirmed_at,
-          early_confirmed, manual_price_required, disqualified)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, 0)`,
-        [entryId, leagueId, user.id, stockName, symbol, market, reason, startPrice, currency, startPrice, provider, lastPriceAt, now, now, manualPriceRequired]
+          early_confirmed, manual_price_required, disqualified, start_price_finalized_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, ?, NULL, NULL, 0, 0, 0, NULL)`,
+        [entryId, leagueId, user.id, stockName, symbol, market, reason, startPrice, currency, startPrice, provider, lastPriceAt, now, now]
       );
       const after = await dbGet<LeagueEntry>("SELECT * FROM league_entries WHERE id = ?", [entryId]);
       await audit(user.id, "create", "league_entries", entryId, null, after, "participant entry create");
     }
 
-    await insertPriceSnapshot(entryId, startPrice, provider, lastPriceAt);
     revalidatePath("/");
     revalidatePath("/leagues");
     revalidatePath("/rankings");
@@ -401,9 +400,7 @@ export async function registerLeagueEntryAction(
       leagueName: league.name,
       stockName,
       symbol,
-      startPrice,
-      provider,
-      manualPriceRequired: manualPriceRequired === 1,
+      provider: "리그 시작일 05:00 KST 자동 확정 예정",
       submittedAt: now,
     };
   } catch (error) {
@@ -447,7 +444,9 @@ export async function manualPriceAdjustAction(formData: FormData) {
   const before = await dbGet<LeagueEntry>("SELECT * FROM league_entries WHERE id = ?", [entryId]);
   if (!before) throw new Error("보정할 종목을 찾을 수 없습니다.");
   const league = await getLeague(before.league_id);
-  const isEnded = league ? league.ends_at <= (await getDebugNow()).toISOString() : false;
+  const currentTime = (await getDebugNow()).toISOString();
+  const isEnded = league ? league.ends_at <= currentTime : false;
+  const needsStartingPrice = Boolean(league && !isEnded && league.starts_at <= currentTime && before.start_price_finalized_at == null);
 
   if (isEnded && league) {
     await dbRun(
@@ -456,6 +455,15 @@ export async function manualPriceAdjustAction(formData: FormData) {
            last_price_at = ?, ended_at = ?, manual_price_required = 0, updated_at = ?
        WHERE id = ?`,
       [price, price, price, nowIso(), league.ends_at, nowIso(), entryId]
+    );
+  } else if (needsStartingPrice && league) {
+    await dbRun("DELETE FROM price_snapshots WHERE league_entry_id = ? AND captured_at < ?", [entryId, league.starts_at]);
+    await dbRun(
+      `UPDATE league_entries
+       SET start_price = ?, current_price = ?, provider = 'admin-manual',
+           last_price_at = ?, start_price_finalized_at = ?, manual_price_required = 0, updated_at = ?
+       WHERE id = ?`,
+      [price, price, nowIso(), nowIso(), nowIso(), entryId]
     );
   } else {
     await dbRun(
@@ -466,7 +474,7 @@ export async function manualPriceAdjustAction(formData: FormData) {
       [price, nowIso(), nowIso(), entryId]
     );
   }
-  await insertPriceSnapshot(entryId, price, "admin-manual", isEnded && league ? league.ends_at : undefined);
+  await insertPriceSnapshot(entryId, price, "admin-manual", isEnded && league ? league.ends_at : needsStartingPrice && league ? league.starts_at : undefined);
   const after = await dbGet<LeagueEntry>("SELECT * FROM league_entries WHERE id = ?", [entryId]);
   await audit(admin.id, "manual_price_adjust", "league_entries", entryId, before, after, reason);
   revalidatePath("/admin");

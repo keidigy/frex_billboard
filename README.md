@@ -34,7 +34,7 @@ Vercel Cron은 매일 05:00 KST에 `/api/cron/daily-prices`를 호출합니다. 
 CRON_SECRET=...
 ```
 
-Cron route는 `Authorization: Bearer $CRON_SECRET` 요청만 처리합니다. 실행 시 진행 중인 리그의 미확정 종목에 대해 외부 일봉 데이터를 조회하고, 실제 거래일 종가가 새로 있을 때만 `price_snapshots`에 추가합니다.
+Cron route는 `Authorization: Bearer $CRON_SECRET` 요청만 처리합니다. 등록 시점의 조회가는 임시값이며, 리그 시작일 05:00 KST 실행에서 시작가와 첫 스냅샷을 확정합니다. 이후에는 진행 중인 리그의 미확정 종목에 대해서만 외부 일봉 데이터를 조회하고, 실제 거래일 종가가 새로 있을 때만 `price_snapshots`에 추가합니다. 리그 종료 시에는 최종가를 박제한 뒤 일일 가격 갱신 대상에서 제외합니다.
 
 ## 최초 admin
 

@@ -109,8 +109,8 @@ export function SettingsClient({
           <input type="hidden" name="market" value={selected?.market ?? "US"} />
           <input type="hidden" name="currency" value={selected?.currency ?? "USD"} />
           <label>
-            실제 가격 조회 실패 시 시작가
-            <input name="startPrice" type="number" min="0" step="0.01" placeholder="fallback only" />
+            자동 조회 실패 시 임시 보정가
+            <input name="startPrice" type="number" min="0" step="0.01" placeholder="선택 입력" />
           </label>
           <label>
             등록 사유
@@ -119,8 +119,7 @@ export function SettingsClient({
           {registerState.ok ? (
             <p className="inline-success" role="status" aria-live="polite">
               {registerState.leagueName}에 {registerState.stockName} ({registerState.symbol}) {registerState.action === "updated" ? "수정" : "등록"} 완료.
-              시작가 {registerState.startPrice?.toLocaleString("ko-KR")} · {registerState.provider}
-              {registerState.manualPriceRequired ? " · 수동 시작가 사용" : null}
+              시작가는 리그 시작일 한국시간 05:00에 자동 확정됩니다.
             </p>
           ) : null}
           {!registerState.ok && registerState.error ? (

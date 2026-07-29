@@ -195,6 +195,7 @@ export async function finalizeEndedLeagues() {
      JOIN leagues ON leagues.id = league_entries.league_id
      WHERE leagues.ends_at <= ?
        AND league_entries.disqualified = 0
+       AND league_entries.start_price_finalized_at IS NOT NULL
        AND (league_entries.ended_at IS NULL OR league_entries.ranking_price IS NULL)
      ORDER BY leagues.ends_at ASC, league_entries.updated_at ASC`,
     [now]
@@ -294,7 +295,7 @@ export async function getApprovedActiveMembers() {
 
 export function rankEntries(entries: LeagueEntryWithUser[]) {
   const ranked = entries
-    .filter((entry) => entry.disqualified === 0)
+    .filter((entry) => entry.disqualified === 0 && entry.start_price_finalized_at != null)
     .map((entry) => {
       const basisPrice = entryBasisPrice(entry);
       const returnPct = ((basisPrice - entry.start_price) / entry.start_price) * 100;
@@ -324,8 +325,19 @@ export async function getDashboardRowsForLeague(league: League) {
   const entryByUserId = new Map(entries.map((entry) => [entry.user_id, entry]));
   const now = (await getDebugNow()).toISOString();
 
+  const pendingRows = entries
+    .filter((entry) => entry.disqualified === 0 && entry.start_price_finalized_at == null)
+    .map((entry) => ({
+      kind: "pending" as const,
+      entry,
+      status: entry.manual_price_required ? "시작가 보정 필요" : "시작가 확정 대기",
+    }));
+
   const inactiveRows = members
-    .filter((member) => !rankedUserIds.has(member.id))
+    .filter((member) => {
+      const entry = entryByUserId.get(member.id);
+      return !rankedUserIds.has(member.id) && (entry == null || entry.start_price_finalized_at != null);
+    })
     .map((member) => {
       const entry = entryByUserId.get(member.id);
       const status = entry?.disqualified ? "실격" : league.starts_at <= now ? "실격" : "미등록";
@@ -339,6 +351,7 @@ export async function getDashboardRowsForLeague(league: League) {
 
   return [
     ...ranked.map((entry) => ({ kind: "ranked" as const, entry })),
+    ...pendingRows,
     ...inactiveRows,
   ];
 }
@@ -366,7 +379,9 @@ export async function getPortfolioIndex(leagueIds: string[]) {
          ELSE COALESCE(current_price, start_price)
        END AS basis
      FROM league_entries
-     WHERE league_id IN (${placeholders}) AND disqualified = 0`,
+     WHERE league_id IN (${placeholders})
+       AND disqualified = 0
+       AND start_price_finalized_at IS NOT NULL`,
     leagueIds
   );
   if (rows.length === 0) return 1000;
@@ -385,7 +400,9 @@ async function getLeagueReturnFactor(leagueId: string) {
          ELSE COALESCE(current_price, start_price)
        END AS basis
      FROM league_entries
-     WHERE league_id = ? AND disqualified = 0`,
+     WHERE league_id = ?
+       AND disqualified = 0
+       AND start_price_finalized_at IS NOT NULL`,
     [leagueId]
   );
 

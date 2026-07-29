@@ -67,6 +67,22 @@ export default async function LeaguesPage() {
                           );
                         }
 
+                        if (row.kind === "pending") {
+                          const entry = row.entry;
+                          return (
+                            <tr key={entry.id} className="inactive-rank">
+                              <td>예정</td>
+                              <td>{entry.real_name}</td>
+                              <td>
+                                {entry.stock_name} <small>{entry.symbol} · {row.status}</small>
+                              </td>
+                              <td>확정 대기</td>
+                              <td>-</td>
+                              <td>-</td>
+                            </tr>
+                          );
+                        }
+
                         const entry = row.entry;
                         return (
                           <tr key={entry.id}>

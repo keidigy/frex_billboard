@@ -98,6 +98,7 @@ const schemaStatements = [
     current_price REAL,
     provider TEXT,
     last_price_at TEXT,
+    start_price_finalized_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     ended_at TEXT,
@@ -151,12 +152,42 @@ async function ensureUserColumns() {
   }
 }
 
+async function ensureLeagueEntryColumns() {
+  const result = await getClient().execute("PRAGMA table_info(league_entries)");
+  const columnNames = new Set(result.rows.map((row) => String(row.name)));
+  if (columnNames.has("start_price_finalized_at")) return;
+
+  await getClient().execute("ALTER TABLE league_entries ADD COLUMN start_price_finalized_at TEXT");
+
+  // Existing leagues already have their registered start prices. Only future leagues
+  // should wait for the first scheduled start-price capture.
+  await getClient().execute({
+    sql: `UPDATE league_entries
+          SET start_price_finalized_at = (
+            SELECT leagues.starts_at
+            FROM leagues
+            WHERE leagues.id = league_entries.league_id
+          )
+          WHERE start_price_finalized_at IS NULL
+            AND EXISTS (
+              SELECT 1
+              FROM leagues
+              WHERE leagues.id = league_entries.league_id
+                AND leagues.starts_at <= ?
+            )`,
+    args: [nowIso()],
+  });
+}
+
 async function ensureSchema() {
   if (!schemaReady) {
     schemaReady = getClient().batch(
       schemaStatements.map((sql) => ({ sql })),
       "write"
-    ).then(() => ensureUserColumns());
+    ).then(async () => {
+      await ensureUserColumns();
+      await ensureLeagueEntryColumns();
+    });
   }
   await schemaReady;
 }

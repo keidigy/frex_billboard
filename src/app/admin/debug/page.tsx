@@ -99,6 +99,7 @@ export default async function DebugPage() {
             <li>중복 IP: 같은 로컬 IP 가입 신청 시 warning flag</li>
             <li>M/L 사유: 20byte 미만이면 등록 거절</li>
             <li>Provider 장애: Naver → Investing → Yahoo → admin 수동 보정</li>
+            <li>시작가 확정: 다음 리그 종목 등록 후 시작일 05:00 KST에 시작가와 첫 스냅샷이 확정되는지 확인</li>
             <li>여러 거래일 경과: debug seed 후 2026-07-08 preset에서 일별 종가 그래프 확인</li>
             <li>조기 확정: debug now를 확정 가능 시점으로 변경 후 대시보드 확인</li>
             <li>종료 박제: 종료 이후 preset 적용 후 대시보드/역대 결과 진입 시 기준가 고정 확인</li>

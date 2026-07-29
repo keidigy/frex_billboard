@@ -101,6 +101,26 @@ export async function Dashboard({ user }: { user: User }) {
                         );
                       }
 
+                      if (row.kind === "pending") {
+                        const entry = row.entry;
+                        return (
+                          <tr key={entry.id} className="inactive-rank">
+                            <td>예정</td>
+                            <td>{entry.real_name}</td>
+                            <td className="stock-cell" title={`${entry.stock_name} (${entry.symbol})`}>
+                              <strong>{entry.stock_name}</strong>
+                              <small>
+                                {entry.symbol} · {row.status}
+                              </small>
+                            </td>
+                            <td>확정 대기</td>
+                            <td>-</td>
+                            <td>-</td>
+                            <td />
+                          </tr>
+                        );
+                      }
+
                       const entry = row.entry;
                       return (
                         <tr key={entry.id} className={rowClass(entry.rank)}>

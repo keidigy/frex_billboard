@@ -67,6 +67,7 @@ export type LeagueEntry = {
   current_price: number | null;
   provider: string | null;
   last_price_at: string | null;
+  start_price_finalized_at: string | null;
   created_at: string;
   updated_at: string;
   ended_at: string | null;

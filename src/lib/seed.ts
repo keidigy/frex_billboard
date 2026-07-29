@@ -68,8 +68,8 @@ export async function seedDebugData(actorId: string) {
       sql: `INSERT INTO league_entries
         (id, league_id, user_id, stock_name, symbol, market, reason, start_price, currency,
          end_price, early_confirm_price, ranking_price, current_price, provider, last_price_at,
-         created_at, updated_at, ended_at, early_confirmed_at, early_confirmed, manual_price_required, disqualified)
-       VALUES (?, ?, ?, ?, ?, ?, 'debug seed registration reason over 20 bytes', ?, ?, NULL, NULL, NULL, ?, 'debug-seed', ?, ?, ?, NULL, NULL, 0, 0, 0)
+         start_price_finalized_at, created_at, updated_at, ended_at, early_confirmed_at, early_confirmed, manual_price_required, disqualified)
+       VALUES (?, ?, ?, ?, ?, ?, 'debug seed registration reason over 20 bytes', ?, ?, NULL, NULL, NULL, ?, 'debug-seed', ?, ?, ?, ?, NULL, NULL, 0, 0, 0)
        ON CONFLICT(league_id, user_id) DO UPDATE SET
         stock_name = excluded.stock_name,
         symbol = excluded.symbol,
@@ -79,8 +79,9 @@ export async function seedDebugData(actorId: string) {
         current_price = excluded.current_price,
         provider = excluded.provider,
         last_price_at = excluded.last_price_at,
+        start_price_finalized_at = excluded.start_price_finalized_at,
         updated_at = excluded.updated_at`,
-      args: [entryId, leagueId, userId, stockName, symbol, market, startPrice, currency, currentPrice, now, now, now],
+      args: [entryId, leagueId, userId, stockName, symbol, market, startPrice, currency, currentPrice, now, league.starts_at, now, now],
     });
 
     for (let index = 0; index < 7; index += 1) {
