@@ -48,9 +48,9 @@ export async function seedDebugData(actorId: string) {
     statements.push({
       sql: `INSERT INTO users
         (id, password_hash, real_name, role, approval_status, active_status, invite_code_used,
-         signup_ip_hash, latest_login_ip, duplicate_ip_flag, created_at, updated_at)
-       VALUES (?, ?, ?, 'member', 'approved', 'active', NULL, ?, 'debug', 0, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET real_name = excluded.real_name, approval_status = 'approved', active_status = 'active', updated_at = excluded.updated_at`,
+         signup_ip_hash, latest_login_ip, duplicate_ip_flag, password_reset_required, created_at, updated_at)
+       VALUES (?, ?, ?, 'member', 'approved', 'active', NULL, ?, 'debug', 0, 0, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET real_name = excluded.real_name, approval_status = 'approved', active_status = 'active', password_reset_required = 0, updated_at = excluded.updated_at`,
       args: [id, passwordHash, realName, `debug-${id}`, now, now],
     });
   }

@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, redirectIfPasswordResetRequired } from "@/lib/auth";
 import { countUsers } from "@/lib/db";
 import { formatMoney, formatPct, leagueTypeLabel } from "@/lib/format";
 import { finalizeEndedLeagues, getDashboardRowsForLeague, getStartedLeagues } from "@/lib/leagues";
@@ -11,6 +11,7 @@ export default async function LeaguesPage() {
   if ((await countUsers()).count === 0) redirect("/setup");
   const user = await getCurrentUser();
   if (!user) redirect("/login");
+  redirectIfPasswordResetRequired(user);
   await finalizeEndedLeagues();
   const leagues = await getStartedLeagues();
   const leagueViews = await Promise.all(

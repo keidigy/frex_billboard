@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, redirectIfPasswordResetRequired } from "@/lib/auth";
 import { countUsers } from "@/lib/db";
 import { finalizeEndedLeagues } from "@/lib/leagues";
 import { getHistoricalRankings, type HistoricalRankingMode } from "@/lib/rankings";
@@ -12,6 +12,7 @@ export default async function RankingsPage({ searchParams }: { searchParams: Pro
   if ((await countUsers()).count === 0) redirect("/setup");
   const user = await getCurrentUser();
   if (!user) redirect("/login");
+  redirectIfPasswordResetRequired(user);
   await finalizeEndedLeagues();
   const params = await searchParams;
   const mode = params.mode === "score" ? "score" : "medal";

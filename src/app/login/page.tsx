@@ -12,7 +12,7 @@ export default async function LoginPage({
 }) {
   if ((await countUsers()).count === 0) redirect("/setup");
   const user = await getCurrentUser();
-  if (user) redirect("/");
+  if (user) redirect(user.password_reset_required ? "/settings/password" : "/");
   const params = await searchParams;
 
   return (

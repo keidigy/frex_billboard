@@ -2,10 +2,9 @@ import { redirect } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { SettingsClient } from "@/components/SettingsClient";
 import { changePasswordAction } from "@/lib/actions";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, redirectIfPasswordResetRequired } from "@/lib/auth";
 import { countUsers } from "@/lib/db";
-import { canRegister, getVisibleLeagues } from "@/lib/leagues";
-import type { League } from "@/lib/types";
+import { getRegistrableLeagues } from "@/lib/leagues";
 
 export const dynamic = "force-dynamic";
 
@@ -13,10 +12,8 @@ export default async function SettingsPage() {
   if ((await countUsers()).count === 0) redirect("/setup");
   const user = await getCurrentUser();
   if (!user) redirect("/login");
-  const visibleLeagues = await getVisibleLeagues();
-  const leagues = (
-    await Promise.all(visibleLeagues.map(async (league) => ((await canRegister(league)) ? league : null)))
-  ).filter((league): league is League => Boolean(league));
+  redirectIfPasswordResetRequired(user);
+  const leagues = await getRegistrableLeagues();
 
   return (
     <AppShell user={user}>

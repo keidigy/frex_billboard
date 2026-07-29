@@ -1,5 +1,7 @@
 import { dbAll, dbBatch, dbGet, dbRun, nowIso } from "@/lib/db";
+import { entryBasisPrice } from "@/lib/entry-basis";
 import { buildFinalizationPatch, pickFinalClose } from "@/lib/finalization";
+import { isRegistrationOpenAt } from "@/lib/league-registration";
 import { historicalCloses, insertPriceSnapshot } from "@/lib/markets";
 import { calculateRebalancedPortfolioIndex } from "@/lib/portfolio";
 import type { League, LeagueEntry, LeagueEntryWithUser, LeagueType, RankedEntry } from "@/lib/types";
@@ -126,6 +128,20 @@ export async function getVisibleLeagues() {
   return (["S", "M", "L"] as LeagueType[]).map((type) => byType.get(type)).filter(Boolean) as League[];
 }
 
+export async function getRegistrableLeagues() {
+  await ensureDefaultLeagues();
+  const now = (await getDebugNow()).toISOString();
+  const rows = await dbAll<League>(
+    `SELECT * FROM leagues
+     WHERE registration_opens_at <= ? AND starts_at > ?
+     ORDER BY starts_at ASC,
+       CASE league_type WHEN 'S' THEN 1 WHEN 'M' THEN 2 ELSE 3 END ASC`,
+    [now, now]
+  );
+
+  return rows.filter((league) => isRegistrationOpenAt(league, now));
+}
+
 export async function getAllLeagues() {
   await ensureDefaultLeagues();
   return dbAll<League>(
@@ -246,7 +262,7 @@ export async function finalizeEndedLeagues() {
 
 export async function canRegister(league: League) {
   const now = (await getDebugNow()).toISOString();
-  return league.registration_opens_at <= now && now < league.starts_at;
+  return isRegistrationOpenAt(league, now);
 }
 
 export async function canEarlyConfirm(league: League) {
@@ -280,12 +296,7 @@ export function rankEntries(entries: LeagueEntryWithUser[]) {
   const ranked = entries
     .filter((entry) => entry.disqualified === 0)
     .map((entry) => {
-      const basisPrice =
-        entry.ranking_price ??
-        entry.early_confirm_price ??
-        entry.end_price ??
-        entry.current_price ??
-        entry.start_price;
+      const basisPrice = entryBasisPrice(entry);
       const returnPct = ((basisPrice - entry.start_price) / entry.start_price) * 100;
       return { ...entry, basisPrice, returnPct, rank: 0 };
     })
@@ -346,7 +357,14 @@ export async function getPortfolioIndex(leagueIds: string[]) {
   if (leagueIds.length === 0) return 1000;
   const placeholders = leagueIds.map(() => "?").join(",");
   const rows = await dbAll<{ start_price: number; basis: number }>(
-    `SELECT start_price, COALESCE(ranking_price, early_confirm_price, end_price, current_price, start_price) AS basis
+    `SELECT start_price,
+       CASE
+         WHEN ended_at IS NOT NULL OR end_price IS NOT NULL
+           THEN COALESCE(ranking_price, end_price, current_price, start_price)
+         WHEN early_confirmed = 1
+           THEN COALESCE(ranking_price, early_confirm_price, current_price, start_price)
+         ELSE COALESCE(current_price, start_price)
+       END AS basis
      FROM league_entries
      WHERE league_id IN (${placeholders}) AND disqualified = 0`,
     leagueIds
@@ -358,7 +376,14 @@ export async function getPortfolioIndex(leagueIds: string[]) {
 
 async function getLeagueReturnFactor(leagueId: string) {
   const rows = await dbAll<{ start_price: number; basis: number }>(
-    `SELECT start_price, COALESCE(ranking_price, early_confirm_price, end_price, current_price, start_price) AS basis
+    `SELECT start_price,
+       CASE
+         WHEN ended_at IS NOT NULL OR end_price IS NOT NULL
+           THEN COALESCE(ranking_price, end_price, current_price, start_price)
+         WHEN early_confirmed = 1
+           THEN COALESCE(ranking_price, early_confirm_price, current_price, start_price)
+         ELSE COALESCE(current_price, start_price)
+       END AS basis
      FROM league_entries
      WHERE league_id = ? AND disqualified = 0`,
     [leagueId]

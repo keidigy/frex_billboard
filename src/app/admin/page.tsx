@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { AdminPasswordResetForm } from "@/components/AdminPasswordResetForm";
 import { AppShell } from "@/components/AppShell";
 import { approveUserAction, createInviteCodeAction, deactivateUserAction, manualPriceAdjustAction, rejectUserAction } from "@/lib/actions";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, redirectIfPasswordResetRequired } from "@/lib/auth";
 import { countUsers, dbAll } from "@/lib/db";
 import { formatDateTime, formatMoney } from "@/lib/format";
 import { finalizeEndedLeagues } from "@/lib/leagues";
@@ -14,6 +15,7 @@ export default async function AdminPage() {
   if ((await countUsers()).count === 0) redirect("/setup");
   const user = await getCurrentUser();
   if (!user) redirect("/login");
+  redirectIfPasswordResetRequired(user);
   if (user.role !== "admin") redirect("/");
   await finalizeEndedLeagues();
 
@@ -70,6 +72,7 @@ export default async function AdminPage() {
                   <th>권한</th>
                   <th>승인</th>
                   <th>활성</th>
+                  <th>비밀번호</th>
                   <th>IP 경고</th>
                   <th />
                 </tr>
@@ -82,8 +85,10 @@ export default async function AdminPage() {
                     <td>{target.role}</td>
                     <td>{target.approval_status}</td>
                     <td>{target.active_status}</td>
+                    <td>{target.password_reset_required ? <span className="warn">재설정 필요</span> : "-"}</td>
                     <td>{target.duplicate_ip_flag ? <span className="warn">중복 IP</span> : "-"}</td>
                     <td className="row-actions">
+                      <AdminPasswordResetForm userId={target.id} disabled={target.id === user.id || target.active_status !== "active"} />
                       {target.approval_status === "pending" ? (
                         <>
                           <form action={approveUserAction}>

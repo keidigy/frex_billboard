@@ -3,7 +3,17 @@
 import crypto from "node:crypto";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { clearSession, createSession, hashPassword, hmacIp, requestIp, requireAdmin, requireUser, verifyPassword } from "@/lib/auth";
+import {
+  clearSession,
+  createSession,
+  hashPassword,
+  hmacIp,
+  requestIp,
+  requireAdmin,
+  requirePasswordReadyUser,
+  requireUser,
+  verifyPassword,
+} from "@/lib/auth";
 import { countUsers, dbGet, dbRun, nowIso } from "@/lib/db";
 import { byteLength } from "@/lib/format";
 import { canEarlyConfirm, canRegister, ensureDefaultLeagues, getDebugNow, getLeague } from "@/lib/leagues";
@@ -32,6 +42,23 @@ function loginError(message: string): never {
 
 function registerError(message: string): never {
   redirect(`/login?registerError=${encodeURIComponent(message)}`);
+}
+
+function temporaryPassword() {
+  return `FREX-${crypto.randomBytes(6).toString("base64url")}`;
+}
+
+function publicUserAuditValue(user: User | undefined | null) {
+  if (!user) return null;
+  return {
+    id: user.id,
+    real_name: user.real_name,
+    role: user.role,
+    approval_status: user.approval_status,
+    active_status: user.active_status,
+    password_reset_required: user.password_reset_required,
+    updated_at: user.updated_at,
+  };
 }
 
 async function audit(actorId: string, actionType: AuditAction, targetTable: string, targetKey: string, beforeValue: unknown, afterValue: unknown, reason: string) {
@@ -85,7 +112,7 @@ export async function loginAction(formData: FormData) {
 
   await dbRun("UPDATE users SET latest_login_ip = ?, updated_at = ? WHERE id = ?", [await requestIp(), nowIso(), id]);
   await createSession(id);
-  redirect("/");
+  redirect(user.password_reset_required ? "/settings/password" : "/");
 }
 
 export async function logoutAction() {
@@ -135,7 +162,7 @@ export async function registerUserAction(formData: FormData) {
 }
 
 export async function changePasswordAction(formData: FormData) {
-  const user = await requireUser();
+  const user = await requirePasswordReadyUser();
   const currentPassword = value(formData, "currentPassword");
   const newPassword = value(formData, "newPassword");
   const newPasswordConfirm = value(formData, "newPasswordConfirm");
@@ -144,6 +171,70 @@ export async function changePasswordAction(formData: FormData) {
   assertPasswordMatch(newPassword, newPasswordConfirm);
   await dbRun("UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?", [await hashPassword(newPassword), nowIso(), user.id]);
   revalidatePath("/settings");
+}
+
+export async function completePasswordResetAction(formData: FormData) {
+  const user = await requireUser();
+  const newPassword = value(formData, "newPassword");
+  const newPasswordConfirm = value(formData, "newPasswordConfirm");
+  if (!user.password_reset_required) redirect("/settings");
+  const passwordError = passwordValidationError(newPassword, newPasswordConfirm);
+  if (passwordError) redirect(`/settings/password?error=${encodeURIComponent(passwordError)}`);
+
+  await dbRun("UPDATE users SET password_hash = ?, password_reset_required = 0, updated_at = ? WHERE id = ?", [
+    await hashPassword(newPassword),
+    nowIso(),
+    user.id,
+  ]);
+  redirect("/");
+}
+
+export type ResetUserPasswordState = {
+  ok: boolean;
+  userId?: string;
+  realName?: string;
+  temporaryPassword?: string;
+  error?: string;
+};
+
+export async function resetUserPasswordAction(
+  _prevState: ResetUserPasswordState,
+  formData: FormData
+): Promise<ResetUserPasswordState> {
+  try {
+    const admin = await requireAdmin();
+    const userId = value(formData, "userId");
+    if (!userId) return { ok: false, error: "사용자를 선택해야 합니다." };
+    if (userId === admin.id) return { ok: false, userId, error: "admin 본인 비밀번호는 여기서 초기화할 수 없습니다." };
+
+    const before = await dbGet<User>("SELECT * FROM users WHERE id = ?", [userId]);
+    if (!before) return { ok: false, userId, error: "사용자를 찾을 수 없습니다." };
+    if (before.active_status !== "active") return { ok: false, userId, error: "비활성화된 사용자는 초기화할 수 없습니다." };
+
+    const password = temporaryPassword();
+    const updatedAt = nowIso();
+    await dbRun("UPDATE users SET password_hash = ?, password_reset_required = 1, updated_at = ? WHERE id = ?", [
+      await hashPassword(password),
+      updatedAt,
+      userId,
+    ]);
+    await dbRun("DELETE FROM sessions WHERE user_id = ?", [userId]);
+
+    const after = await dbGet<User>("SELECT * FROM users WHERE id = ?", [userId]);
+    await audit(
+      admin.id,
+      "password_reset",
+      "users",
+      userId,
+      publicUserAuditValue(before),
+      publicUserAuditValue(after),
+      "admin temporary password reset"
+    );
+    revalidatePath("/admin");
+    return { ok: true, userId, realName: before.real_name, temporaryPassword: password };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "비밀번호 초기화에 실패했습니다." };
+  }
 }
 
 export async function createInviteCodeAction(formData: FormData) {
@@ -192,7 +283,7 @@ export async function deactivateUserAction(formData: FormData) {
 }
 
 export async function registerLeagueEntryAction(formData: FormData) {
-  const user = await requireUser();
+  const user = await requirePasswordReadyUser();
   const leagueId = value(formData, "leagueId");
   const stockName = value(formData, "stockName");
   const symbol = value(formData, "symbol");
@@ -230,7 +321,9 @@ export async function registerLeagueEntryAction(formData: FormData) {
     await dbRun(
       `UPDATE league_entries
        SET stock_name = ?, symbol = ?, market = ?, reason = ?, start_price = ?, currency = ?,
-           current_price = ?, provider = ?, last_price_at = ?, manual_price_required = ?, updated_at = ?
+           end_price = NULL, early_confirm_price = NULL, ranking_price = NULL,
+           current_price = ?, provider = ?, last_price_at = ?, manual_price_required = ?,
+           ended_at = NULL, early_confirmed_at = NULL, early_confirmed = 0, updated_at = ?
        WHERE id = ?`,
       [stockName, symbol, market, reason, startPrice, currency, startPrice, provider, lastPriceAt, manualPriceRequired, now, entryId]
     );
@@ -255,7 +348,7 @@ export async function registerLeagueEntryAction(formData: FormData) {
 }
 
 export async function earlyConfirmAction(formData: FormData) {
-  const user = await requireUser();
+  const user = await requirePasswordReadyUser();
   const entryId = value(formData, "entryId");
   const entry = await dbGet<LeagueEntry>("SELECT * FROM league_entries WHERE id = ? AND user_id = ?", [entryId, user.id]);
   if (!entry) throw new Error("본인 종목만 확정할 수 있습니다.");
@@ -301,10 +394,10 @@ export async function manualPriceAdjustAction(formData: FormData) {
   } else {
     await dbRun(
       `UPDATE league_entries
-       SET current_price = ?, ranking_price = ?, provider = 'admin-manual',
+       SET current_price = ?, provider = 'admin-manual',
            last_price_at = ?, manual_price_required = 0, updated_at = ?
        WHERE id = ?`,
-      [price, price, nowIso(), nowIso(), entryId]
+      [price, nowIso(), nowIso(), entryId]
     );
   }
   await insertPriceSnapshot(entryId, price, "admin-manual", isEnded && league ? league.ends_at : undefined);

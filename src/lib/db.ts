@@ -54,6 +54,7 @@ const schemaStatements = [
     signup_ip_hash TEXT,
     latest_login_ip TEXT,
     duplicate_ip_flag INTEGER NOT NULL DEFAULT 0,
+    password_reset_required INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`,
@@ -142,12 +143,20 @@ const schemaStatements = [
   )`,
 ];
 
+async function ensureUserColumns() {
+  const result = await getClient().execute("PRAGMA table_info(users)");
+  const columnNames = new Set(result.rows.map((row) => String(row.name)));
+  if (!columnNames.has("password_reset_required")) {
+    await getClient().execute("ALTER TABLE users ADD COLUMN password_reset_required INTEGER NOT NULL DEFAULT 0");
+  }
+}
+
 async function ensureSchema() {
   if (!schemaReady) {
     schemaReady = getClient().batch(
       schemaStatements.map((sql) => ({ sql })),
       "write"
-    ).then(() => undefined);
+    ).then(() => ensureUserColumns());
   }
   await schemaReady;
 }

@@ -9,7 +9,8 @@ export type AuditAction =
   | "update"
   | "delete"
   | "deactivate"
-  | "manual_price_adjust";
+  | "manual_price_adjust"
+  | "password_reset";
 
 export type User = {
   id: string;
@@ -22,6 +23,7 @@ export type User = {
   signup_ip_hash: string | null;
   latest_login_ip: string | null;
   duplicate_ip_flag: number;
+  password_reset_required: number;
   created_at: string;
   updated_at: string;
 };

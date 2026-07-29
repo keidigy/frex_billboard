@@ -38,7 +38,7 @@ export function buildFinalizationPatch(
   leagueEndsAt: string,
   finalPrice: FinalPrice | null
 ): FinalizationPatch | null {
-  const fixedPrice = entry.ranking_price ?? (entry.early_confirmed ? entry.early_confirm_price : entry.end_price);
+  const fixedPrice = entry.early_confirmed ? entry.ranking_price ?? entry.early_confirm_price : entry.end_price;
 
   if (fixedPrice != null) {
     if (entry.ended_at === leagueEndsAt) return null;

@@ -1,8 +1,12 @@
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
+import { redirect } from "next/navigation";
 import { cookies, headers } from "next/headers";
 import { dbGet, dbRun, nowIso } from "@/lib/db";
+import { mustResetPassword } from "@/lib/password-reset";
 import type { User } from "@/lib/types";
+
+export { mustResetPassword };
 
 const SESSION_COOKIE = "frex_session";
 
@@ -46,14 +50,24 @@ export async function getCurrentUser() {
   return row;
 }
 
+export function redirectIfPasswordResetRequired(user: Pick<User, "password_reset_required">) {
+  if (mustResetPassword(user)) redirect("/settings/password");
+}
+
 export async function requireUser() {
   const user = await getCurrentUser();
   if (!user) throw new Error("로그인이 필요합니다.");
   return user;
 }
 
-export async function requireAdmin() {
+export async function requirePasswordReadyUser() {
   const user = await requireUser();
+  if (mustResetPassword(user)) throw new Error("비밀번호 재설정이 필요합니다.");
+  return user;
+}
+
+export async function requireAdmin() {
+  const user = await requirePasswordReadyUser();
   if (user.role !== "admin") throw new Error("admin 권한이 필요합니다.");
   return user;
 }

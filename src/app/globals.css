@@ -389,6 +389,44 @@ h2 {
   background: var(--danger);
 }
 
+.secondary-button {
+  background: #475569;
+}
+
+.password-reset-form {
+  display: grid;
+  gap: 6px;
+  min-width: 170px;
+}
+
+.temp-password-result,
+.inline-error {
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 800;
+  margin: 0;
+  padding: 7px 8px;
+}
+
+.temp-password-result {
+  background: #ecfdf5;
+  border: 1px solid #bbf7d0;
+  color: #047857;
+}
+
+.temp-password-result code {
+  color: #064e3b;
+  display: block;
+  margin-top: 4px;
+  white-space: nowrap;
+}
+
+.inline-error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: var(--danger);
+}
+
 .empty-cell {
   color: var(--muted);
   padding: 32px 8px;
@@ -715,6 +753,7 @@ h2 {
 .row-actions {
   align-items: center;
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 

@@ -59,6 +59,22 @@ test("buildFinalizationPatch keeps early-confirmed ranking prices fixed", () => 
   assert.equal(patch?.snapshot, null);
 });
 
+test("buildFinalizationPatch ignores stale ranking prices for normal active entries", () => {
+  const patch = buildFinalizationPatch(
+    {
+      ...baseEntry,
+      ranking_price: 95,
+      current_price: 110,
+    },
+    "2026-08-01T00:00:00.000Z",
+    { price: 108, provider: "yahoo", at: "2026-07-31T00:00:00.000Z" }
+  );
+
+  assert.equal(patch?.endPrice, 108);
+  assert.equal(patch?.rankingPrice, 108);
+  assert.equal(patch?.currentPrice, 108);
+});
+
 test("buildFinalizationPatch does not rewrite already archived entries", () => {
   const patch = buildFinalizationPatch(
     {

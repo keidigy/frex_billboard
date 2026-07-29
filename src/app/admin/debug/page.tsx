@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { deleteDebugDataAction, seedDebugDataAction, setDebugNowAction, setProviderFailureAction } from "@/lib/actions";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, redirectIfPasswordResetRequired } from "@/lib/auth";
 import { countUsers, dbAll } from "@/lib/db";
 import { formatDateTime } from "@/lib/format";
 import { getDebugNow } from "@/lib/leagues";
@@ -12,6 +12,7 @@ export default async function DebugPage() {
   if ((await countUsers()).count === 0) redirect("/setup");
   const user = await getCurrentUser();
   if (!user) redirect("/login");
+  redirectIfPasswordResetRequired(user);
   if (user.role !== "admin") redirect("/");
 
   const flags = Object.fromEntries(
